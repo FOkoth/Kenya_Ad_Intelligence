@@ -50,6 +50,12 @@ def migrate_database():
     if 'selected_stations' not in columns:
         cursor.execute("ALTER TABLE booking_requests ADD COLUMN selected_stations TEXT")
     
+    if 'campaign_goal' not in columns:
+        cursor.execute("ALTER TABLE booking_requests ADD COLUMN campaign_goal TEXT")
+    
+    if 'status_updated_date' not in columns:
+        cursor.execute("ALTER TABLE booking_requests ADD COLUMN status_updated_date TEXT")
+    
     # Check and add missing columns to audience_leads
     cursor.execute("PRAGMA table_info(audience_leads)")
     columns = [col[1] for col in cursor.fetchall()]
@@ -141,11 +147,13 @@ def init_database():
         budget_kes REAL,
         duration_days INTEGER,
         target_audience TEXT,
+        campaign_goal TEXT,
         contact_name TEXT,
         contact_email TEXT,
         contact_phone TEXT,
         status TEXT DEFAULT 'pending',
         request_date TEXT,
+        status_updated_date TEXT,
         notes TEXT,
         FOREIGN KEY (company_id) REFERENCES companies (company_id)
     )
@@ -348,6 +356,9 @@ st.markdown("""
         padding: 1rem;
         margin-bottom: 1rem;
     }
+    .booking-card-pending { border-left: 4px solid #F59E0B; }
+    .booking-card-confirmed { border-left: 4px solid #10B981; }
+    .booking-card-suspended { border-left: 4px solid #EF4444; }
     
     .lead-card {
         background: #F0FDF4;
@@ -357,42 +368,12 @@ st.markdown("""
         margin-bottom: 0.5rem;
     }
     
-    .badge-new {
-        background: #10B981;
-        color: white;
-        padding: 0.2rem 0.6rem;
-        border-radius: 20px;
-        font-size: 0.7rem;
-        display: inline-block;
-    }
+    .badge-new { background: #10B981; color: white; padding: 0.2rem 0.6rem; border-radius: 20px; font-size: 0.7rem; display: inline-block; }
+    .badge-pending { background: #F59E0B; color: white; padding: 0.2rem 0.6rem; border-radius: 20px; font-size: 0.7rem; display: inline-block; }
+    .badge-confirmed { background: #10B981; color: white; padding: 0.2rem 0.6rem; border-radius: 20px; font-size: 0.7rem; display: inline-block; }
+    .badge-suspended { background: #EF4444; color: white; padding: 0.2rem 0.6rem; border-radius: 20px; font-size: 0.7rem; display: inline-block; }
     
-    .badge-contacted {
-        background: #F59E0B;
-        color: white;
-        padding: 0.2rem 0.6rem;
-        border-radius: 20px;
-        font-size: 0.7rem;
-        display: inline-block;
-    }
-    
-    .badge-converted {
-        background: #8B5CF6;
-        color: white;
-        padding: 0.2rem 0.6rem;
-        border-radius: 20px;
-        font-size: 0.7rem;
-        display: inline-block;
-    }
-    
-    .footer {
-        text-align: center;
-        padding: 1rem;
-        margin-top: 1.5rem;
-        background: #F8FAFC;
-        border-radius: 12px;
-        font-size: 0.7rem;
-        color: #64748B;
-    }
+    .footer { text-align: center; padding: 1rem; margin-top: 1.5rem; background: #F8FAFC; border-radius: 12px; font-size: 0.7rem; color: #64748B; }
     
     .stTabs [data-baseweb="tab-list"] {
         gap: 0.25rem;
@@ -420,7 +401,6 @@ st.markdown("""
 # DATABASE HELPER FUNCTIONS
 # ============================================================================
 def get_company_data(company_id):
-    """Get campaign data for a specific company"""
     try:
         conn = sqlite3.connect('ad_intelligence.db')
         df = pd.read_sql_query('''
@@ -434,7 +414,6 @@ def get_company_data(company_id):
         return pd.DataFrame()
 
 def get_all_companies():
-    """Get all active companies"""
     try:
         conn = sqlite3.connect('ad_intelligence.db')
         df = pd.read_sql_query("SELECT company_id, company_name, industry, email, phone FROM companies WHERE status = 'active'", conn)
@@ -444,7 +423,6 @@ def get_all_companies():
         return pd.DataFrame()
 
 def get_company_logs(company_id):
-    """Get media logs for a specific company"""
     try:
         conn = sqlite3.connect('ad_intelligence.db')
         df = pd.read_sql_query('''
@@ -457,58 +435,93 @@ def get_company_logs(company_id):
     except Exception as e:
         return pd.DataFrame()
 
-def add_media_log(company_id, station_name, media_type, spot_time, duration, cost, reach):
-    """Add a new media log entry"""
-    try:
-        conn = sqlite3.connect('ad_intelligence.db')
-        cursor = conn.cursor()
-        booking_ref = str(uuid.uuid4())[:8].upper()
-        cursor.execute('''
-        INSERT INTO media_logs (company_id, station_name, media_type, spot_time, duration_seconds, cost_kes, estimated_reach, log_date, status, booking_reference)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (company_id, station_name, media_type, spot_time, duration, cost, reach, datetime.now().isoformat(), 'planned', booking_ref))
-        conn.commit()
-        conn.close()
-        return booking_ref
-    except Exception as e:
-        return None
-
-def save_recommendation(company_id, campaign_goal, budget, duration, audience, region, stations, estimated_roas):
-    """Save recommendation for future reference"""
-    try:
-        conn = sqlite3.connect('ad_intelligence.db')
-        cursor = conn.cursor()
-        cursor.execute('''
-        INSERT INTO recommendations (company_id, campaign_goal, budget_kes, duration_days, target_audience, target_region, recommended_stations, estimated_roas, created_date)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (company_id, campaign_goal, budget, duration, audience, region, stations, estimated_roas, datetime.now().isoformat()))
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        return False
-
-def create_booking_request(company_id, selected_stations_list, media_type, preferred_time, budget, duration, audience, contact_name, contact_email, contact_phone, notes=""):
+def create_booking_request(company_id, selected_stations_list, campaign_goal, budget, duration, audience, region_type, contact_name, contact_email, contact_phone, notes=""):
     """Create a booking request from advertiser with multiple stations"""
     try:
         conn = sqlite3.connect('ad_intelligence.db')
         cursor = conn.cursor()
         selected_stations_str = ", ".join(selected_stations_list)
         primary_station = selected_stations_list[0] if selected_stations_list else "Multiple"
+        media_type = "Mixed"
         
         cursor.execute('''
-        INSERT INTO booking_requests (company_id, station_name, selected_stations, media_type, preferred_time, budget_kes, duration_days, target_audience, contact_name, contact_email, contact_phone, status, request_date, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (company_id, primary_station, selected_stations_str, media_type, preferred_time, budget, duration, audience, contact_name, contact_email, contact_phone, 'pending', datetime.now().isoformat(), notes))
+        INSERT INTO booking_requests (
+            company_id, station_name, selected_stations, media_type, preferred_time, 
+            budget_kes, duration_days, target_audience, campaign_goal, 
+            contact_name, contact_email, contact_phone, status, request_date, status_updated_date, notes
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            company_id, primary_station, selected_stations_str, media_type, datetime.now().strftime("%Y-%m-%d"),
+            budget, duration, audience, campaign_goal,
+            contact_name, contact_email, contact_phone, 'pending', 
+            datetime.now().isoformat(), datetime.now().isoformat(), notes
+        ))
         booking_id = cursor.lastrowid
         conn.commit()
         conn.close()
         return booking_id
     except Exception as e:
+        print(f"Error creating booking: {e}")
         return None
 
+def get_booking_requests(company_id=None):
+    """Get all booking requests, optionally filtered by company"""
+    try:
+        conn = sqlite3.connect('ad_intelligence.db')
+        if company_id:
+            df = pd.read_sql_query('''
+                SELECT * FROM booking_requests 
+                WHERE company_id = ? 
+                ORDER BY request_date DESC
+            ''', conn, params=(company_id,))
+        else:
+            df = pd.read_sql_query('''
+                SELECT br.*, c.company_name 
+                FROM booking_requests br
+                JOIN companies c ON br.company_id = c.company_id
+                ORDER BY br.request_date DESC
+            ''', conn)
+        conn.close()
+        return df
+    except Exception as e:
+        return pd.DataFrame()
+
+def update_booking_status(booking_id, status):
+    """Update booking request status"""
+    try:
+        conn = sqlite3.connect('ad_intelligence.db')
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE booking_requests 
+            SET status = ?, status_updated_date = ? 
+            WHERE booking_id = ?
+        ''', (status, datetime.now().isoformat(), booking_id))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        return False
+
+def get_booking_statistics(company_id=None):
+    """Get booking statistics for dashboard"""
+    bookings_df = get_booking_requests(company_id)
+    if bookings_df.empty:
+        return {'total': 0, 'pending': 0, 'confirmed': 0, 'suspended': 0}
+    
+    total = len(bookings_df)
+    pending = len(bookings_df[bookings_df['status'] == 'pending'])
+    confirmed = len(bookings_df[bookings_df['status'] == 'confirmed'])
+    suspended = len(bookings_df[bookings_df['status'] == 'suspended'])
+    
+    return {
+        'total': total,
+        'pending': pending,
+        'confirmed': confirmed,
+        'suspended': suspended
+    }
+
 def add_audience_lead(company_id, campaign_id, station_name, name, email, phone, product_interest, message, source):
-    """Add a lead from audience responding to ad"""
     try:
         conn = sqlite3.connect('ad_intelligence.db')
         cursor = conn.cursor()
@@ -523,41 +536,14 @@ def add_audience_lead(company_id, campaign_id, station_name, name, email, phone,
     except Exception as e:
         return None
 
-def get_booking_requests(company_id=None):
-    """Get all booking requests, optionally filtered by company"""
-    try:
-        conn = sqlite3.connect('ad_intelligence.db')
-        if company_id:
-            df = pd.read_sql_query('''
-                SELECT br.*, c.company_name 
-                FROM booking_requests br
-                JOIN companies c ON br.company_id = c.company_id
-                WHERE br.company_id = ? 
-                ORDER BY br.request_date DESC
-            ''', conn, params=(company_id,))
-        else:
-            df = pd.read_sql_query('''
-                SELECT br.*, c.company_name 
-                FROM booking_requests br
-                JOIN companies c ON br.company_id = c.company_id
-                ORDER BY br.request_date DESC
-            ''', conn)
-        conn.close()
-        return df
-    except Exception as e:
-        return pd.DataFrame()
-
 def get_audience_leads(company_id=None):
-    """Get all audience leads, optionally filtered by company"""
     try:
         conn = sqlite3.connect('ad_intelligence.db')
         if company_id:
             df = pd.read_sql_query('''
-                SELECT al.*, c.company_name 
-                FROM audience_leads al
-                JOIN companies c ON al.company_id = c.company_id
-                WHERE al.company_id = ? 
-                ORDER BY al.created_date DESC
+                SELECT * FROM audience_leads 
+                WHERE company_id = ? 
+                ORDER BY created_date DESC
             ''', conn, params=(company_id,))
         else:
             df = pd.read_sql_query('''
@@ -572,7 +558,6 @@ def get_audience_leads(company_id=None):
         return pd.DataFrame()
 
 def update_lead_status(lead_id, status):
-    """Update lead status"""
     try:
         conn = sqlite3.connect('ad_intelligence.db')
         cursor = conn.cursor()
@@ -584,20 +569,7 @@ def update_lead_status(lead_id, status):
     except Exception as e:
         return False
 
-def update_booking_status(booking_id, status):
-    """Update booking request status"""
-    try:
-        conn = sqlite3.connect('ad_intelligence.db')
-        cursor = conn.cursor()
-        cursor.execute("UPDATE booking_requests SET status = ? WHERE booking_id = ?", (status, booking_id))
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        return False
-
 def get_lead_statistics(company_id=None):
-    """Get lead statistics for dashboard"""
     leads_df = get_audience_leads(company_id)
     if leads_df.empty:
         return {'total': 0, 'new': 0, 'contacted': 0, 'converted': 0, 'conversion_rate': 0}
@@ -614,24 +586,6 @@ def get_lead_statistics(company_id=None):
         'contacted': contacted,
         'converted': converted,
         'conversion_rate': round(conversion_rate, 1)
-    }
-
-def get_booking_statistics(company_id=None):
-    """Get booking statistics for dashboard"""
-    bookings_df = get_booking_requests(company_id)
-    if bookings_df.empty:
-        return {'total': 0, 'pending': 0, 'confirmed': 0, 'completed': 0}
-    
-    total = len(bookings_df)
-    pending = len(bookings_df[bookings_df['status'] == 'pending'])
-    confirmed = len(bookings_df[bookings_df['status'] == 'confirmed'])
-    completed = len(bookings_df[bookings_df['status'] == 'completed'])
-    
-    return {
-        'total': total,
-        'pending': pending,
-        'confirmed': confirmed,
-        'completed': completed
     }
 
 # ============================================================================
@@ -657,7 +611,6 @@ class StationDatabase:
         }
     
     def get_all_stations_list(self):
-        """Get list of all stations for multi-select"""
         stations = []
         for media_type, station_list in self.stations.items():
             for name, info in station_list.items():
@@ -767,7 +720,7 @@ def show_login():
         st.caption("Client: username='safaricom', password='client123'")
 
 # ============================================================================
-# ADMIN DASHBOARD WITH BOOKINGS AND LEADS
+# ADMIN DASHBOARD
 # ============================================================================
 def show_admin_dashboard():
     st.markdown("""
@@ -777,7 +730,6 @@ def show_admin_dashboard():
     </div>
     """, unsafe_allow_html=True)
     
-    # Get all data for admin overview
     all_companies = get_all_companies()
     all_bookings = get_booking_requests()
     all_leads = get_audience_leads()
@@ -799,38 +751,38 @@ def show_admin_dashboard():
         total_bookings = len(all_bookings) if not all_bookings.empty else 0
         st.markdown(f"""
         <div class="metric-card">
-            <div class="metric-label">📋 Total Booking Requests</div>
+            <div class="metric-label">📋 Total Bookings</div>
             <div class="metric-value">{total_bookings}</div>
         </div>
         """, unsafe_allow_html=True)
     
     with col3:
-        total_leads = len(all_leads) if not all_leads.empty else 0
+        pending_bookings = len(all_bookings[all_bookings['status'] == 'pending']) if not all_bookings.empty else 0
         st.markdown(f"""
         <div class="metric-card">
-            <div class="metric-label">👥 Total Audience Leads</div>
-            <div class="metric-value">{total_leads}</div>
+            <div class="metric-label">⏳ Pending</div>
+            <div class="metric-value">{pending_bookings}</div>
         </div>
         """, unsafe_allow_html=True)
     
     with col4:
-        pending_bookings = len(all_bookings[all_bookings['status'] == 'pending']) if not all_bookings.empty else 0
+        total_leads = len(all_leads) if not all_leads.empty else 0
         st.markdown(f"""
         <div class="metric-card">
-            <div class="metric-label">⏳ Pending Bookings</div>
-            <div class="metric-value">{pending_bookings}</div>
+            <div class="metric-label">👥 Total Leads</div>
+            <div class="metric-value">{total_leads}</div>
         </div>
         """, unsafe_allow_html=True)
     
     st.markdown("---")
     
     # Tabs for Admin
-    admin_tab1, admin_tab2, admin_tab3, admin_tab4, admin_tab5 = st.tabs([
-        "📊 Performance", "📋 All Booking Requests", "👥 All Audience Leads", "🏢 Companies", "📺 Media Directory"
+    admin_tab1, admin_tab2, admin_tab3, admin_tab4 = st.tabs([
+        "📊 Performance", "📋 All Bookings", "👥 All Leads", "🏢 Companies"
     ])
     
     # ========================================================================
-    # ADMIN TAB 1: Performance (Company view)
+    # ADMIN TAB 1: Performance
     # ========================================================================
     with admin_tab1:
         if not all_companies.empty:
@@ -839,9 +791,6 @@ def show_admin_dashboard():
             if selected_company != "All Companies":
                 company_id = all_companies[all_companies['company_name'] == selected_company]['company_id'].values[0]
                 df = get_company_data(company_id)
-                company_name = selected_company
-                
-                # Company-specific lead stats
                 lead_stats = get_lead_statistics(company_id)
                 booking_stats = get_booking_statistics(company_id)
                 
@@ -849,85 +798,73 @@ def show_admin_dashboard():
                 with col1:
                     st.markdown(f'<div class="metric-card"><div class="metric-label">👥 Leads</div><div class="metric-value">{lead_stats["total"]}</div></div>', unsafe_allow_html=True)
                 with col2:
-                    st.markdown(f'<div class="metric-card"><div class="metric-label">🆕 New Leads</div><div class="metric-value">{lead_stats["new"]}</div></div>', unsafe_allow_html=True)
-                with col3:
                     st.markdown(f'<div class="metric-card"><div class="metric-label">✅ Converted</div><div class="metric-value">{lead_stats["converted"]}</div></div>', unsafe_allow_html=True)
-                with col4:
-                    st.markdown(f'<div class="metric-card"><div class="metric-label">📋 Bookings</div><div class="metric-value">{booking_stats["total"]}</div></div>', unsafe_allow_html=True)
-            else:
-                df = pd.DataFrame()
-                company_name = "All Companies"
-            
-            if not df.empty:
-                total_spend = df['spend_kes'].sum()
-                total_revenue = df['revenue_kes'].sum()
-                avg_roas = total_revenue / total_spend if total_spend > 0 else 0
-                
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.markdown(f'<div class="metric-card"><div class="metric-label">💰 Total Spend</div><div class="metric-value">KES {total_spend:,.0f}</div></div>', unsafe_allow_html=True)
-                with col2:
-                    st.markdown(f'<div class="metric-card"><div class="metric-label">💵 Total Revenue</div><div class="metric-value">KES {total_revenue:,.0f}</div></div>', unsafe_allow_html=True)
                 with col3:
-                    roas_color = "#EF4444" if avg_roas < 2 else "#10B981"
-                    st.markdown(f'<div class="metric-card"><div class="metric-label">📈 Avg ROAS</div><div class="metric-value" style="color:{roas_color};">{avg_roas:.2f}x</div></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="metric-card"><div class="metric-label">📋 Bookings</div><div class="metric-value">{booking_stats["total"]}</div></div>', unsafe_allow_html=True)
+                with col4:
+                    st.markdown(f'<div class="metric-card"><div class="metric-label">⏳ Pending Bookings</div><div class="metric-value">{booking_stats["pending"]}</div></div>', unsafe_allow_html=True)
                 
-                col1, col2 = st.columns(2)
-                with col1:
-                    if 'campaign_name' in df.columns and 'roas' in df.columns:
-                        campaign_roas = df.groupby('campaign_name')['roas'].mean().reset_index()
-                        campaign_roas = campaign_roas.sort_values('roas', ascending=True)
-                        fig = px.bar(campaign_roas, x='roas', y='campaign_name', orientation='h',
-                                    color='roas', color_continuous_scale='RdYlGn')
-                        fig.add_vline(x=2.0, line_dash="dash", line_color="#EF4444")
-                        fig.update_layout(height=400, plot_bgcolor='white', showlegend=False)
-                        st.plotly_chart(fig, use_container_width=True)
+                if not df.empty:
+                    total_spend = df['spend_kes'].sum()
+                    total_revenue = df['revenue_kes'].sum()
+                    avg_roas = total_revenue / total_spend if total_spend > 0 else 0
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.markdown(f'<div class="metric-card"><div class="metric-label">💰 Total Spend</div><div class="metric-value">KES {total_spend:,.0f}</div></div>', unsafe_allow_html=True)
+                    with col2:
+                        st.markdown(f'<div class="metric-card"><div class="metric-label">💵 Total Revenue</div><div class="metric-value">KES {total_revenue:,.0f}</div></div>', unsafe_allow_html=True)
+                    with col3:
+                        roas_color = "#EF4444" if avg_roas < 2 else "#10B981"
+                        st.markdown(f'<div class="metric-card"><div class="metric-label">📈 Avg ROAS</div><div class="metric-value" style="color:{roas_color};">{avg_roas:.2f}x</div></div>', unsafe_allow_html=True)
             else:
-                st.info("No campaign data available")
+                st.info("Select a company to view detailed performance")
     
     # ========================================================================
-    # ADMIN TAB 2: All Booking Requests
+    # ADMIN TAB 2: All Bookings
     # ========================================================================
     with admin_tab2:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
         st.markdown("#### 📋 All Booking Requests")
         
         if not all_bookings.empty:
-            for _, booking in all_bookings.iterrows():
-                status_color = "🟡" if booking['status'] == 'pending' else "🟢" if booking['status'] == 'confirmed' else "🔴"
-                
-                # Display stations selected
-                stations_display = booking.get('selected_stations', booking['station_name'])
+            status_filter = st.selectbox("Filter by Status", ["All", "Pending", "Confirmed", "Suspended"])
+            
+            filtered_bookings = all_bookings
+            if status_filter != "All":
+                filtered_bookings = all_bookings[all_bookings['status'] == status_filter.lower()]
+            
+            for _, booking in filtered_bookings.iterrows():
+                border_class = "booking-card-pending" if booking['status'] == 'pending' else "booking-card-confirmed" if booking['status'] == 'confirmed' else "booking-card-suspended"
+                status_badge = "badge-pending" if booking['status'] == 'pending' else "badge-confirmed" if booking['status'] == 'confirmed' else "badge-suspended"
                 
                 st.markdown(f"""
-                <div class="booking-card">
-                    <p><strong>{status_color} Booking #{booking['booking_id']}</strong> - {booking['request_date'][:10] if booking['request_date'] else 'N/A'}</p>
-                    <p><strong>Company:</strong> {booking['company_name']}</p>
-                    <p><strong>Stations Requested:</strong> {stations_display}</p>
+                <div class="booking-card {border_class}">
+                    <p><strong>Booking #{booking['booking_id']}</strong> - {booking['request_date'][:10] if booking['request_date'] else 'N/A'}</p>
+                    <p><strong>Company:</strong> {booking['company_name'] if 'company_name' in booking else 'N/A'}</p>
+                    <p><strong>Stations:</strong> {booking.get('selected_stations', booking['station_name'])}</p>
                     <p><strong>Budget:</strong> KES {booking['budget_kes']:,.0f} | <strong>Duration:</strong> {booking['duration_days']} days</p>
+                    <p><strong>Campaign Goal:</strong> {booking.get('campaign_goal', 'N/A')}</p>
                     <p><strong>Contact:</strong> {booking['contact_name']} - {booking['contact_email']} - {booking['contact_phone']}</p>
-                    <p><strong>Target Audience:</strong> {booking['target_audience']}</p>
-                    <p><strong>Preferred Launch:</strong> {booking['preferred_time']}</p>
-                    <p><strong>Status:</strong> <span class="badge-new">{booking['status'].upper()}</span></p>
+                    <p><strong>Status:</strong> <span class="{status_badge}">{booking['status'].upper()}</span></p>
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # Status update buttons
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    if booking['status'] == 'pending':
-                        if st.button(f"✅ Confirm", key=f"confirm_{booking['booking_id']}"):
+                    if booking['status'] != 'confirmed':
+                        if st.button(f"✅ Confirm", key=f"admin_confirm_{booking['booking_id']}"):
                             update_booking_status(booking['booking_id'], 'confirmed')
                             st.rerun()
                 with col2:
-                    if booking['status'] in ['pending', 'confirmed']:
-                        if st.button(f"📞 Mark Completed", key=f"complete_{booking['booking_id']}"):
-                            update_booking_status(booking['booking_id'], 'completed')
+                    if booking['status'] != 'suspended':
+                        if st.button(f"⏸️ Suspend", key=f"admin_suspend_{booking['booking_id']}"):
+                            update_booking_status(booking['booking_id'], 'suspended')
                             st.rerun()
                 with col3:
-                    if booking['status'] == 'pending':
-                        if st.button(f"❌ Reject", key=f"reject_{booking['booking_id']}"):
-                            update_booking_status(booking['booking_id'], 'rejected')
+                    if booking['status'] != 'pending':
+                        if st.button(f"🔄 Reset to Pending", key=f"admin_pending_{booking['booking_id']}"):
+                            update_booking_status(booking['booking_id'], 'pending')
                             st.rerun()
                 
                 st.markdown("---")
@@ -937,59 +874,47 @@ def show_admin_dashboard():
         st.markdown('</div>', unsafe_allow_html=True)
     
     # ========================================================================
-    # ADMIN TAB 3: All Audience Leads
+    # ADMIN TAB 3: All Leads
     # ========================================================================
     with admin_tab3:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
         st.markdown("#### 👥 All Audience Leads")
         
         if not all_leads.empty:
-            # Filter by status
-            status_filter = st.selectbox("Filter by Status", ["All", "New", "Contacted", "Converted"])
+            status_filter = st.selectbox("Filter by Status", ["All", "New", "Contacted", "Converted"], key="admin_lead_filter")
             
             filtered_leads = all_leads
             if status_filter != "All":
                 filtered_leads = all_leads[all_leads['status'] == status_filter.lower()]
             
             for _, lead in filtered_leads.iterrows():
-                if lead['status'] == 'new':
-                    badge = '<span class="badge-new">NEW</span>'
-                elif lead['status'] == 'contacted':
-                    badge = '<span class="badge-contacted">CONTACTED</span>'
-                else:
-                    badge = '<span class="badge-converted">CONVERTED</span>'
+                badge = "badge-new" if lead['status'] == 'new' else "badge-pending" if lead['status'] == 'contacted' else "badge-confirmed"
                 
                 st.markdown(f"""
                 <div class="lead-card">
-                    <p><strong>{lead['lead_name']}</strong> {badge} - {lead['created_date'][:10] if lead['created_date'] else 'N/A'}</p>
+                    <p><strong>{lead['lead_name']}</strong> <span class="{badge}">{lead['status'].upper()}</span> - {lead['created_date'][:10] if lead['created_date'] else 'N/A'}</p>
                     <p><strong>Company:</strong> {lead['company_name']} | <strong>Phone:</strong> {lead['lead_phone']} | <strong>Email:</strong> {lead['lead_email']}</p>
                     <p><strong>Interested in:</strong> {lead['interest_product']}</p>
                     <p><strong>Message:</strong> {lead['message'][:200] if lead['message'] else 'No message'}</p>
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # Status update buttons
                 if lead['status'] == 'new':
                     col1, col2 = st.columns(2)
                     with col1:
-                        if st.button(f"📞 Mark Contacted", key=f"contact_{lead['lead_id']}"):
+                        if st.button(f"📞 Mark Contacted", key=f"admin_contact_{lead['lead_id']}"):
                             update_lead_status(lead['lead_id'], 'contacted')
                             st.rerun()
                     with col2:
-                        if st.button(f"✅ Mark Converted", key=f"convert_{lead['lead_id']}"):
+                        if st.button(f"✅ Mark Converted", key=f"admin_convert_{lead['lead_id']}"):
                             update_lead_status(lead['lead_id'], 'converted')
                             st.rerun()
                 elif lead['status'] == 'contacted':
-                    if st.button(f"✅ Mark Converted", key=f"convert_{lead['lead_id']}"):
+                    if st.button(f"✅ Mark Converted", key=f"admin_convert_{lead['lead_id']}"):
                         update_lead_status(lead['lead_id'], 'converted')
                         st.rerun()
                 
                 st.markdown("---")
-            
-            # Statistics
-            st.markdown("#### 📊 Lead Statistics by Company")
-            lead_stats_by_company = all_leads.groupby(['company_name', 'status']).size().unstack(fill_value=0).reset_index()
-            st.dataframe(lead_stats_by_company, use_container_width=True)
             
             # Export
             csv = all_leads.to_csv(index=False)
@@ -1012,69 +937,6 @@ def show_admin_dashboard():
             st.info("No companies registered")
         
         st.markdown('</div>', unsafe_allow_html=True)
-    
-    # ========================================================================
-    # ADMIN TAB 5: Media Directory
-    # ========================================================================
-    with admin_tab5:
-        media = get_kenyan_media()
-        selected_region = st.selectbox("Select Region", list(media.keys()))
-        
-        if selected_region:
-            region_media = media[selected_region]
-            if "TV" in region_media:
-                st.markdown(f"#### 📺 TV Stations in {selected_region}")
-                for tv in region_media["TV"]:
-                    with st.expander(tv['name']):
-                        st.write(f"**Reach:** {tv['reach']}")
-                        st.write(f"**Format:** {tv['format']}")
-                        st.write(f"**Price Tier:** {tv['price_tier']}")
-            
-            if "Radio" in region_media:
-                st.markdown(f"#### 📻 Radio Stations in {selected_region}")
-                for radio in region_media["Radio"]:
-                    with st.expander(radio['name']):
-                        st.write(f"**Reach:** {radio['reach']}")
-                        st.write(f"**Format:** {radio['format']}")
-                        st.write(f"**Price Tier:** {radio['price_tier']}")
-
-# ============================================================================
-# KENYAN MEDIA DIRECTORY
-# ============================================================================
-def get_kenyan_media():
-    return {
-        "Nairobi Metropolitan": {
-            "TV": [
-                {"name": "Citizen TV", "reach": "5,000,000", "format": "General", "price_tier": "Premium"},
-                {"name": "KTN", "reach": "3,000,000", "format": "News", "price_tier": "Premium"},
-                {"name": "NTV", "reach": "2,800,000", "format": "News/Entertainment", "price_tier": "Premium"},
-                {"name": "KBC", "reach": "2,000,000", "format": "Public", "price_tier": "Standard"},
-            ],
-            "Radio": [
-                {"name": "Citizen Radio", "reach": "2,500,000", "format": "News/Talk", "price_tier": "Premium"},
-                {"name": "Radio Jambo", "reach": "2,000,000", "format": "Entertainment", "price_tier": "Standard"},
-                {"name": "Classic 105", "reach": "1,500,000", "format": "Adult Contemporary", "price_tier": "Premium"},
-            ]
-        },
-        "Coast Region": {
-            "Radio": [
-                {"name": "Baraka FM", "reach": "600,000", "format": "Religious/Talk", "price_tier": "Economy"},
-                {"name": "Milele FM", "reach": "450,000", "format": "Entertainment", "price_tier": "Economy"},
-            ]
-        },
-        "Western Region": {
-            "Radio": [
-                {"name": "Ramogi FM", "reach": "850,000", "format": "Vernacular", "price_tier": "Economy"},
-                {"name": "Lake Victoria FM", "reach": "700,000", "format": "Vernacular", "price_tier": "Economy"},
-            ]
-        },
-        "Central Region": {
-            "Radio": [
-                {"name": "Inooro FM", "reach": "1,200,000", "format": "Vernacular", "price_tier": "Standard"},
-                {"name": "Kameme FM", "reach": "1,000,000", "format": "Vernacular", "price_tier": "Standard"},
-            ]
-        }
-    }
 
 # ============================================================================
 # CLIENT PORTAL
@@ -1088,11 +950,9 @@ def show_client_portal():
         cursor.execute("SELECT company_name, industry FROM companies WHERE company_id = ?", (company_id,))
         result = cursor.fetchone()
         company_name = result[0] if result else "Your Company"
-        company_industry = result[1] if result and result[1] else "General"
         conn.close()
     except Exception as e:
         company_name = "Your Company"
-        company_industry = "General"
     
     st.markdown(f"""
     <div class="main-header">
@@ -1101,12 +961,12 @@ def show_client_portal():
     </div>
     """, unsafe_allow_html=True)
     
-    # Get lead statistics for dashboard
+    # Get statistics
     lead_stats = get_lead_statistics(company_id)
     booking_stats = get_booking_statistics(company_id)
     
-    # Lead Metrics Row on Dashboard
-    st.markdown("### 📊 Your Lead Performance")
+    # Lead Metrics Row
+    st.markdown("### 📊 Your Performance Overview")
     
     col1, col2, col3, col4, col5 = st.columns(5)
     
@@ -1129,24 +989,24 @@ def show_client_portal():
     with col3:
         st.markdown(f"""
         <div class="metric-card">
-            <div class="metric-label">📞 Contacted</div>
-            <div class="metric-value">{lead_stats['contacted']}</div>
+            <div class="metric-label">✅ Converted</div>
+            <div class="metric-value">{lead_stats['converted']}</div>
         </div>
         """, unsafe_allow_html=True)
     
     with col4:
         st.markdown(f"""
         <div class="metric-card">
-            <div class="metric-label">✅ Converted</div>
-            <div class="metric-value">{lead_stats['converted']}</div>
+            <div class="metric-label">📋 Total Bookings</div>
+            <div class="metric-value">{booking_stats['total']}</div>
         </div>
         """, unsafe_allow_html=True)
     
     with col5:
         st.markdown(f"""
         <div class="metric-card">
-            <div class="metric-label">📈 Conversion Rate</div>
-            <div class="metric-value">{lead_stats['conversion_rate']}%</div>
+            <div class="metric-label">⏳ Pending</div>
+            <div class="metric-value">{booking_stats['pending']}</div>
         </div>
         """, unsafe_allow_html=True)
     
@@ -1158,11 +1018,11 @@ def show_client_portal():
     leads_df = get_audience_leads(company_id)
     
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📊 Performance", "🎯 Smart Recommendations", "📺 TV/Radio Logs", "📋 Booking Requests", "👥 Audience Leads"
+        "📊 Performance", "🎯 Smart Recommendations", "📺 TV/Radio Logs", "📋 My Bookings", "👥 Audience Leads"
     ])
     
     # ========================================================================
-    # TAB 1: Performance Dashboard
+    # TAB 1: Performance
     # ========================================================================
     with tab1:
         if not df.empty:
@@ -1188,18 +1048,11 @@ def show_client_portal():
                     fig.add_vline(x=2.0, line_dash="dash", line_color="#EF4444")
                     fig.update_layout(height=350, plot_bgcolor='white', showlegend=False)
                     st.plotly_chart(fig, use_container_width=True)
-            with col2:
-                if 'platform' in df.columns and 'roas' in df.columns:
-                    platform_roas = df.groupby('platform')['roas'].mean().reset_index()
-                    fig = px.pie(platform_roas, values='roas', names='platform', hole=0.4,
-                                color_discrete_sequence=['#004953', '#006B7A', '#C6A43F'])
-                    fig.update_layout(height=350)
-                    st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("No campaign data available")
     
     # ========================================================================
-    # TAB 2: Smart Recommendations with Multi-Station Selection
+    # TAB 2: Smart Recommendations
     # ========================================================================
     with tab2:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
@@ -1211,18 +1064,12 @@ def show_client_portal():
         col1, col2 = st.columns(2)
         
         with col1:
-            campaign_goal = st.selectbox(
-                "Campaign Goal",
-                ["Brand Awareness", "Lead Generation", "Sales", "Customer Retention", "Product Launch"]
-            )
+            campaign_goal = st.selectbox("Campaign Goal", ["Brand Awareness", "Lead Generation", "Sales", "Customer Retention", "Product Launch"])
             budget = st.number_input("Total Budget (KES)", min_value=100000, max_value=10000000, value=500000, step=50000)
             duration = st.select_slider("Campaign Duration (Days)", options=[7, 14, 21, 30, 45, 60], value=14)
         
         with col2:
-            target_audience = st.selectbox(
-                "Target Audience",
-                ["Mass Market", "Youth (18-35)", "Professionals (25-45)", "Rural Population", "Urban Consumers", "Affluent Segment"]
-            )
+            target_audience = st.selectbox("Target Audience", ["Mass Market", "Youth (18-35)", "Professionals (25-45)", "Rural Population", "Urban Consumers", "Affluent Segment"])
             region_type = st.selectbox("Target Region Type", ["National", "Local", "Both"])
             selected_area = None
             if region_type in ["Local", "Both"]:
@@ -1239,8 +1086,14 @@ def show_client_portal():
             )
             
             estimated_roas = 2.5
-            station_names = ", ".join([r["station_name"] for r in recommendations[:3]])
-            save_recommendation(company_id, campaign_goal, budget, duration, target_audience, region_type, station_names, estimated_roas)
+            st.session_state.recommendations = recommendations
+            st.session_state.campaign_params = {
+                'goal': campaign_goal,
+                'budget': budget,
+                'duration': duration,
+                'audience': target_audience,
+                'region': region_type
+            }
             
             st.markdown("---")
             st.markdown(f"""
@@ -1251,9 +1104,6 @@ def show_client_portal():
             """, unsafe_allow_html=True)
             
             st.markdown("### 🏆 Recommended Stations")
-            
-            # Store recommendations in session for multi-select
-            st.session_state.recommended_stations = recommendations
             
             for idx, rec in enumerate(recommendations[:5]):
                 price_icon = "🟢" if rec["price_tier"] == "Economy" else "🟡" if rec["price_tier"] == "Standard" else "🔴"
@@ -1267,43 +1117,38 @@ def show_client_portal():
             
             # Multi-station booking form
             st.markdown("---")
-            st.markdown("### 📞 Book Multiple Stations")
-            st.markdown("Select the stations you want to book for your campaign")
+            st.markdown("### 📞 Book Your Campaign")
             
-            # Create checkboxes for each recommended station
-            station_options = [f"{r['station_name']} ({r['media_type']}) - KES {r['cost_per_spot']:,}/spot" for r in recommendations[:5]]
-            selected_stations_display = st.multiselect("Select Stations to Book", station_options)
+            station_options = [f"{r['station_name']} ({r['media_type']})" for r in recommendations[:5]]
+            selected_stations = st.multiselect("Select Stations to Book", station_options)
             
-            # Extract selected station names
-            selected_station_names = [s.split(" (")[0] for s in selected_stations_display]
-            
-            with st.form("multi_station_booking_form"):
+            with st.form("booking_form"):
                 st.markdown("#### Contact Information")
                 col1, col2 = st.columns(2)
                 with col1:
-                    contact_name = st.text_input("Your Name*", key="multi_name")
-                    contact_email = st.text_input("Email Address*", key="multi_email")
+                    contact_name = st.text_input("Your Name*")
+                    contact_email = st.text_input("Email Address*")
                 with col2:
-                    contact_phone = st.text_input("Phone Number*", key="multi_phone")
+                    contact_phone = st.text_input("Phone Number*")
                     preferred_launch = st.date_input("Preferred Launch Date", min_value=datetime.now().date())
                 
                 additional_notes = st.text_area("Campaign Details / Special Requirements")
                 
-                if st.form_submit_button("📞 Submit Booking Request for Selected Stations", use_container_width=True):
-                    if contact_name and contact_email and contact_phone and selected_station_names:
+                if st.form_submit_button("📞 Submit Booking Request", use_container_width=True):
+                    if contact_name and contact_email and contact_phone and selected_stations:
                         booking_id = create_booking_request(
-                            company_id, selected_station_names, "Mixed",
-                            preferred_launch.strftime("%Y-%m-%d"),
-                            budget, duration, target_audience,
+                            company_id, selected_stations, campaign_goal,
+                            budget, duration, target_audience, region_type,
                             contact_name, contact_email, contact_phone,
                             additional_notes
                         )
                         if booking_id:
-                            st.success(f"✅ Booking request submitted! Reference: #{booking_id} for {len(selected_station_names)} station(s)")
+                            st.success(f"✅ Booking request submitted! Reference: #{booking_id}")
                             st.balloons()
+                            st.rerun()
                         else:
-                            st.error("Error submitting request")
-                    elif not selected_station_names:
+                            st.error("Error submitting request. Please try again.")
+                    elif not selected_stations:
                         st.warning("Please select at least one station to book")
                     else:
                         st.error("Please fill in all contact fields")
@@ -1330,36 +1175,72 @@ def show_client_portal():
             display_cols = [c for c in ['station_name', 'media_type', 'spot_time', 'cost_kes'] if c in logs_df.columns]
             if display_cols:
                 st.dataframe(logs_df[display_cols].head(10), use_container_width=True)
-            
-            csv = logs_df.to_csv(index=False)
-            st.download_button("📥 Export Logs", csv, f"media_logs_{datetime.now().strftime('%Y%m%d')}.csv")
         else:
-            st.info("No airtime logs yet. Generate a media plan in the Smart Recommendations tab.")
+            st.info("No airtime logs yet")
         
         st.markdown('</div>', unsafe_allow_html=True)
     
     # ========================================================================
-    # TAB 4: Booking Requests
+    # TAB 4: My Bookings (Client can manage status)
     # ========================================================================
     with tab4:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("#### 📋 Your Booking Requests")
+        st.markdown("#### 📋 My Booking Requests")
         
         if not bookings_df.empty:
+            # Booking statistics
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total", booking_stats['total'])
+            with col2:
+                st.metric("Pending", booking_stats['pending'])
+            with col3:
+                st.metric("Confirmed", booking_stats['confirmed'])
+            with col4:
+                st.metric("Suspended", booking_stats['suspended'])
+            
+            st.markdown("---")
+            
             for _, booking in bookings_df.iterrows():
-                status_icon = "🟡" if booking['status'] == 'pending' else "🟢" if booking['status'] == 'confirmed' else "🔴"
-                stations_display = booking.get('selected_stations', booking['station_name'])
+                border_class = "booking-card-pending" if booking['status'] == 'pending' else "booking-card-confirmed" if booking['status'] == 'confirmed' else "booking-card-suspended"
+                status_badge = "badge-pending" if booking['status'] == 'pending' else "badge-confirmed" if booking['status'] == 'confirmed' else "badge-suspended"
                 
                 st.markdown(f"""
-                <div class="booking-card">
-                    <p><strong>{status_icon} Booking #{booking['booking_id']}</strong> - {booking['request_date'][:10] if booking['request_date'] else 'N/A'}</p>
-                    <p><strong>Stations:</strong> {stations_display}</p>
+                <div class="booking-card {border_class}">
+                    <p><strong>Booking #{booking['booking_id']}</strong> - {booking['request_date'][:10] if booking['request_date'] else 'N/A'}</p>
+                    <p><strong>Stations:</strong> {booking.get('selected_stations', booking['station_name'])}</p>
                     <p><strong>Budget:</strong> KES {booking['budget_kes']:,.0f} | <strong>Duration:</strong> {booking['duration_days']} days</p>
-                    <p><strong>Status:</strong> <span class="badge-new">{booking['status'].upper()}</span></p>
+                    <p><strong>Campaign Goal:</strong> {booking.get('campaign_goal', 'N/A')}</p>
+                    <p><strong>Status:</strong> <span class="{status_badge}">{booking['status'].upper()}</span></p>
+                    <p><strong>Last Updated:</strong> {booking['status_updated_date'][:10] if booking.get('status_updated_date') else 'N/A'}</p>
                 </div>
                 """, unsafe_allow_html=True)
+                
+                # Status update buttons - Client can update their own booking status
+                st.markdown("**Update Status:**")
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    if booking['status'] != 'confirmed':
+                        if st.button(f"✅ Mark Confirmed", key=f"confirm_{booking['booking_id']}"):
+                            update_booking_status(booking['booking_id'], 'confirmed')
+                            st.rerun()
+                
+                with col2:
+                    if booking['status'] != 'suspended':
+                        if st.button(f"⏸️ Suspend", key=f"suspend_{booking['booking_id']}"):
+                            update_booking_status(booking['booking_id'], 'suspended')
+                            st.rerun()
+                
+                with col3:
+                    if booking['status'] != 'pending':
+                        if st.button(f"🔄 Reset to Pending", key=f"reset_{booking['booking_id']}"):
+                            update_booking_status(booking['booking_id'], 'pending')
+                            st.rerun()
+                
+                st.markdown("---")
         else:
-            st.info("No booking requests yet. Generate a media plan and submit a booking.")
+            st.info("No booking requests yet. Generate a media plan in the Smart Recommendations tab to create your first booking.")
         
         st.markdown('</div>', unsafe_allow_html=True)
     
@@ -1369,11 +1250,9 @@ def show_client_portal():
     with tab5:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
         st.markdown("#### 👥 Audience Leads")
-        st.markdown("People who have responded to your advertisements")
         
         # Demo lead submission
         with st.expander("📝 Demo: Submit a Test Lead", expanded=False):
-            st.markdown("This simulates an audience member responding to your ad.")
             test_name = st.text_input("Name", "John Kamau", key="test_name")
             test_email = st.text_input("Email", "john@example.com", key="test_email")
             test_phone = st.text_input("Phone", "+254712345678", key="test_phone")
@@ -1383,10 +1262,8 @@ def show_client_portal():
             if st.button("Submit Test Lead", key="submit_test"):
                 lead_id = add_audience_lead(company_id, 1, "Test Campaign", test_name, test_email, test_phone, test_interest, test_message, "Website")
                 if lead_id:
-                    st.success("Test lead submitted! Refresh to see it below.")
+                    st.success("Test lead submitted!")
                     st.rerun()
-                else:
-                    st.error("Error submitting lead")
         
         st.markdown("---")
         
@@ -1394,16 +1271,11 @@ def show_client_portal():
             st.markdown(f"#### Your Leads ({len(leads_df[leads_df['status'] == 'new'])} new)")
             
             for _, lead in leads_df.iterrows():
-                if lead['status'] == 'new':
-                    badge = '<span class="badge-new">NEW</span>'
-                elif lead['status'] == 'contacted':
-                    badge = '<span class="badge-contacted">CONTACTED</span>'
-                else:
-                    badge = '<span class="badge-converted">CONVERTED</span>'
+                badge = "badge-new" if lead['status'] == 'new' else "badge-pending" if lead['status'] == 'contacted' else "badge-confirmed"
                 
                 st.markdown(f"""
                 <div class="lead-card">
-                    <p><strong>{lead['lead_name']}</strong> {badge} - {lead['created_date'][:10] if lead['created_date'] else 'N/A'}</p>
+                    <p><strong>{lead['lead_name']}</strong> <span class="{badge}">{lead['status'].upper()}</span> - {lead['created_date'][:10] if lead['created_date'] else 'N/A'}</p>
                     <p><strong>Phone:</strong> {lead['lead_phone']} | <strong>Email:</strong> {lead['lead_email']}</p>
                     <p><strong>Interested in:</strong> {lead['interest_product']}</p>
                     <p><strong>Message:</strong> {lead['message'][:200] if lead['message'] else 'No message'}</p>
@@ -1435,7 +1307,7 @@ def show_client_portal():
             csv = leads_df.to_csv(index=False)
             st.download_button("📥 Export Your Leads", csv, f"my_leads_{datetime.now().strftime('%Y%m%d')}.csv")
         else:
-            st.info("No audience leads yet. Use the demo form above to test lead capture.")
+            st.info("No audience leads yet")
         
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1444,9 +1316,8 @@ def show_client_portal():
 # ============================================================================
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
-    st.session_state.show_booking_form = False
-    st.session_state.selected_station = None
-    st.session_state.recommended_stations = []
+    st.session_state.recommendations = []
+    st.session_state.campaign_params = {}
 
 if st.session_state.logged_in:
     if st.session_state.role == 'admin':
@@ -1458,9 +1329,8 @@ if st.session_state.logged_in:
         st.markdown("---")
         if st.button("🚪 Logout", use_container_width=True):
             st.session_state.logged_in = False
-            st.session_state.show_booking_form = False
-            st.session_state.selected_station = None
-            st.session_state.recommended_stations = []
+            st.session_state.recommendations = []
+            st.session_state.campaign_params = {}
             st.rerun()
 else:
     show_login()
