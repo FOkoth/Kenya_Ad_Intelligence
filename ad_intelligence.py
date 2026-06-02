@@ -1,6 +1,6 @@
 """
 Ad Intelligence Kenya - Complete Platform with Lead Generation
-Features: Smart Recommendations + Client Booking + Audience Response + Admin Overview
+Features: Smart Recommendations + Client Booking + Two-Way Approval Workflow
 """
 import streamlit as st
 import pandas as pd
@@ -55,6 +55,15 @@ def migrate_database():
     
     if 'status_updated_date' not in columns:
         cursor.execute("ALTER TABLE booking_requests ADD COLUMN status_updated_date TEXT")
+    
+    if 'admin_notes' not in columns:
+        cursor.execute("ALTER TABLE booking_requests ADD COLUMN admin_notes TEXT")
+    
+    if 'approved_date' not in columns:
+        cursor.execute("ALTER TABLE booking_requests ADD COLUMN approved_date TEXT")
+    
+    if 'confirmed_date' not in columns:
+        cursor.execute("ALTER TABLE booking_requests ADD COLUMN confirmed_date TEXT")
     
     # Check and add missing columns to audience_leads
     cursor.execute("PRAGMA table_info(audience_leads)")
@@ -135,7 +144,7 @@ def init_database():
     )
     ''')
     
-    # Booking requests
+    # Booking requests with approval workflow
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS booking_requests (
         booking_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -151,9 +160,12 @@ def init_database():
         contact_name TEXT,
         contact_email TEXT,
         contact_phone TEXT,
-        status TEXT DEFAULT 'pending',
+        status TEXT DEFAULT 'pending_approval',
         request_date TEXT,
         status_updated_date TEXT,
+        approved_date TEXT,
+        confirmed_date TEXT,
+        admin_notes TEXT,
         notes TEXT,
         FOREIGN KEY (company_id) REFERENCES companies (company_id)
     )
@@ -349,6 +361,13 @@ st.markdown("""
         color: white;
     }
     
+    .warning-card {
+        background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%);
+        border-radius: 12px;
+        padding: 1rem;
+        color: white;
+    }
+    
     .booking-card {
         background: #FFFBEB;
         border: 1px solid #FDE68A;
@@ -357,6 +376,7 @@ st.markdown("""
         margin-bottom: 1rem;
     }
     .booking-card-pending { border-left: 4px solid #F59E0B; }
+    .booking-card-approved { border-left: 4px solid #8B5CF6; }
     .booking-card-confirmed { border-left: 4px solid #10B981; }
     .booking-card-suspended { border-left: 4px solid #EF4444; }
     
@@ -368,10 +388,11 @@ st.markdown("""
         margin-bottom: 0.5rem;
     }
     
-    .badge-new { background: #10B981; color: white; padding: 0.2rem 0.6rem; border-radius: 20px; font-size: 0.7rem; display: inline-block; }
     .badge-pending { background: #F59E0B; color: white; padding: 0.2rem 0.6rem; border-radius: 20px; font-size: 0.7rem; display: inline-block; }
+    .badge-approved { background: #8B5CF6; color: white; padding: 0.2rem 0.6rem; border-radius: 20px; font-size: 0.7rem; display: inline-block; }
     .badge-confirmed { background: #10B981; color: white; padding: 0.2rem 0.6rem; border-radius: 20px; font-size: 0.7rem; display: inline-block; }
     .badge-suspended { background: #EF4444; color: white; padding: 0.2rem 0.6rem; border-radius: 20px; font-size: 0.7rem; display: inline-block; }
+    .badge-new { background: #10B981; color: white; padding: 0.2rem 0.6rem; border-radius: 20px; font-size: 0.7rem; display: inline-block; }
     
     .footer { text-align: center; padding: 1rem; margin-top: 1.5rem; background: #F8FAFC; border-radius: 12px; font-size: 0.7rem; color: #64748B; }
     
@@ -391,6 +412,24 @@ st.markdown("""
         background: #004953;
         color: white;
     }
+    
+    .status-timeline {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin: 0.5rem 0;
+        padding: 0.5rem;
+        background: #F8FAFC;
+        border-radius: 8px;
+    }
+    .status-step {
+        flex: 1;
+        text-align: center;
+        font-size: 0.7rem;
+    }
+    .status-step-active { color: #004953; font-weight: bold; }
+    .status-step-complete { color: #10B981; }
+    .status-step-pending { color: #94A3B8; }
     
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
@@ -454,7 +493,7 @@ def create_booking_request(company_id, selected_stations_list, campaign_goal, bu
         ''', (
             company_id, primary_station, selected_stations_str, media_type, datetime.now().strftime("%Y-%m-%d"),
             budget, duration, audience, campaign_goal,
-            contact_name, contact_email, contact_phone, 'pending', 
+            contact_name, contact_email, contact_phone, 'pending_approval', 
             datetime.now().isoformat(), datetime.now().isoformat(), notes
         ))
         booking_id = cursor.lastrowid
@@ -487,16 +526,33 @@ def get_booking_requests(company_id=None):
     except Exception as e:
         return pd.DataFrame()
 
-def update_booking_status(booking_id, status):
-    """Update booking request status"""
+def update_booking_status(booking_id, status, admin_notes=None):
+    """Update booking request status with timestamps"""
     try:
         conn = sqlite3.connect('ad_intelligence.db')
         cursor = conn.cursor()
-        cursor.execute('''
-            UPDATE booking_requests 
-            SET status = ?, status_updated_date = ? 
-            WHERE booking_id = ?
-        ''', (status, datetime.now().isoformat(), booking_id))
+        
+        current_time = datetime.now().isoformat()
+        
+        if status == 'approved':
+            cursor.execute('''
+                UPDATE booking_requests 
+                SET status = ?, status_updated_date = ?, approved_date = ?, admin_notes = ?
+                WHERE booking_id = ?
+            ''', (status, current_time, current_time, admin_notes, booking_id))
+        elif status == 'confirmed':
+            cursor.execute('''
+                UPDATE booking_requests 
+                SET status = ?, status_updated_date = ?, confirmed_date = ?
+                WHERE booking_id = ?
+            ''', (status, current_time, current_time, booking_id))
+        else:
+            cursor.execute('''
+                UPDATE booking_requests 
+                SET status = ?, status_updated_date = ?
+                WHERE booking_id = ?
+            ''', (status, current_time, booking_id))
+        
         conn.commit()
         conn.close()
         return True
@@ -507,16 +563,18 @@ def get_booking_statistics(company_id=None):
     """Get booking statistics for dashboard"""
     bookings_df = get_booking_requests(company_id)
     if bookings_df.empty:
-        return {'total': 0, 'pending': 0, 'confirmed': 0, 'suspended': 0}
+        return {'total': 0, 'pending_approval': 0, 'approved': 0, 'confirmed': 0, 'suspended': 0}
     
     total = len(bookings_df)
-    pending = len(bookings_df[bookings_df['status'] == 'pending'])
+    pending_approval = len(bookings_df[bookings_df['status'] == 'pending_approval'])
+    approved = len(bookings_df[bookings_df['status'] == 'approved'])
     confirmed = len(bookings_df[bookings_df['status'] == 'confirmed'])
     suspended = len(bookings_df[bookings_df['status'] == 'suspended'])
     
     return {
         'total': total,
-        'pending': pending,
+        'pending_approval': pending_approval,
+        'approved': approved,
         'confirmed': confirmed,
         'suspended': suspended
     }
@@ -609,13 +667,6 @@ class StationDatabase:
                 "Inooro FM": {"region": "Central", "reach": 1200000, "cost_per_spot": 45000, "primary_audience": ["Kikuyu Community"], "best_for": ["Agriculture"], "price_tier": "Standard"}
             }
         }
-    
-    def get_all_stations_list(self):
-        stations = []
-        for media_type, station_list in self.stations.items():
-            for name, info in station_list.items():
-                stations.append(f"{name} ({media_type}) - {info['price_tier']}")
-        return stations
     
     def get_stations_by_region(self, region_type):
         filtered = {"TV": [], "Radio": []}
@@ -737,7 +788,7 @@ def show_admin_dashboard():
     # Statistics Row
     st.markdown("### 📊 Platform Overview")
     
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
         st.markdown(f"""
@@ -757,15 +808,24 @@ def show_admin_dashboard():
         """, unsafe_allow_html=True)
     
     with col3:
-        pending_bookings = len(all_bookings[all_bookings['status'] == 'pending']) if not all_bookings.empty else 0
+        pending_approval = len(all_bookings[all_bookings['status'] == 'pending_approval']) if not all_bookings.empty else 0
         st.markdown(f"""
         <div class="metric-card">
-            <div class="metric-label">⏳ Pending</div>
-            <div class="metric-value">{pending_bookings}</div>
+            <div class="metric-label">⏳ Pending Approval</div>
+            <div class="metric-value">{pending_approval}</div>
         </div>
         """, unsafe_allow_html=True)
     
     with col4:
+        confirmed = len(all_bookings[all_bookings['status'] == 'confirmed']) if not all_bookings.empty else 0
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-label">✅ Confirmed</div>
+            <div class="metric-value">{confirmed}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col5:
         total_leads = len(all_leads) if not all_leads.empty else 0
         st.markdown(f"""
         <div class="metric-card">
@@ -778,7 +838,7 @@ def show_admin_dashboard():
     
     # Tabs for Admin
     admin_tab1, admin_tab2, admin_tab3, admin_tab4 = st.tabs([
-        "📊 Performance", "📋 All Bookings", "👥 All Leads", "🏢 Companies"
+        "📊 Performance", "📋 Pending Approvals", "👥 All Leads", "🏢 Companies"
     ])
     
     # ========================================================================
@@ -802,7 +862,7 @@ def show_admin_dashboard():
                 with col3:
                     st.markdown(f'<div class="metric-card"><div class="metric-label">📋 Bookings</div><div class="metric-value">{booking_stats["total"]}</div></div>', unsafe_allow_html=True)
                 with col4:
-                    st.markdown(f'<div class="metric-card"><div class="metric-label">⏳ Pending Bookings</div><div class="metric-value">{booking_stats["pending"]}</div></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="metric-card"><div class="metric-label">⏳ Pending Approval</div><div class="metric-value">{booking_stats["pending_approval"]}</div></div>', unsafe_allow_html=True)
                 
                 if not df.empty:
                     total_spend = df['spend_kes'].sum()
@@ -821,55 +881,67 @@ def show_admin_dashboard():
                 st.info("Select a company to view detailed performance")
     
     # ========================================================================
-    # ADMIN TAB 2: All Bookings
+    # ADMIN TAB 2: Pending Approvals
     # ========================================================================
     with admin_tab2:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("#### 📋 All Booking Requests")
+        st.markdown("#### 📋 Booking Requests - Pending Approval")
         
-        if not all_bookings.empty:
-            status_filter = st.selectbox("Filter by Status", ["All", "Pending", "Confirmed", "Suspended"])
-            
-            filtered_bookings = all_bookings
-            if status_filter != "All":
-                filtered_bookings = all_bookings[all_bookings['status'] == status_filter.lower()]
-            
-            for _, booking in filtered_bookings.iterrows():
-                border_class = "booking-card-pending" if booking['status'] == 'pending' else "booking-card-confirmed" if booking['status'] == 'confirmed' else "booking-card-suspended"
-                status_badge = "badge-pending" if booking['status'] == 'pending' else "badge-confirmed" if booking['status'] == 'confirmed' else "badge-suspended"
-                
+        pending_bookings = all_bookings[all_bookings['status'] == 'pending_approval'] if not all_bookings.empty else pd.DataFrame()
+        
+        if not pending_bookings.empty:
+            for _, booking in pending_bookings.iterrows():
                 st.markdown(f"""
-                <div class="booking-card {border_class}">
+                <div class="booking-card booking-card-pending">
                     <p><strong>Booking #{booking['booking_id']}</strong> - {booking['request_date'][:10] if booking['request_date'] else 'N/A'}</p>
                     <p><strong>Company:</strong> {booking['company_name'] if 'company_name' in booking else 'N/A'}</p>
                     <p><strong>Stations:</strong> {booking.get('selected_stations', booking['station_name'])}</p>
                     <p><strong>Budget:</strong> KES {booking['budget_kes']:,.0f} | <strong>Duration:</strong> {booking['duration_days']} days</p>
                     <p><strong>Campaign Goal:</strong> {booking.get('campaign_goal', 'N/A')}</p>
                     <p><strong>Contact:</strong> {booking['contact_name']} - {booking['contact_email']} - {booking['contact_phone']}</p>
-                    <p><strong>Status:</strong> <span class="{status_badge}">{booking['status'].upper()}</span></p>
+                    <p><strong>Status:</strong> <span class="badge-pending">PENDING APPROVAL</span></p>
                 </div>
                 """, unsafe_allow_html=True)
                 
-                col1, col2, col3 = st.columns(3)
+                col1, col2 = st.columns(2)
                 with col1:
-                    if booking['status'] != 'confirmed':
-                        if st.button(f"✅ Confirm", key=f"admin_confirm_{booking['booking_id']}"):
-                            update_booking_status(booking['booking_id'], 'confirmed')
-                            st.rerun()
+                    admin_notes = st.text_area(f"Admin Notes (Optional)", key=f"notes_{booking['booking_id']}", placeholder="Add any notes about this approval...")
+                
                 with col2:
-                    if booking['status'] != 'suspended':
-                        if st.button(f"⏸️ Suspend", key=f"admin_suspend_{booking['booking_id']}"):
-                            update_booking_status(booking['booking_id'], 'suspended')
-                            st.rerun()
-                with col3:
-                    if booking['status'] != 'pending':
-                        if st.button(f"🔄 Reset to Pending", key=f"admin_pending_{booking['booking_id']}"):
-                            update_booking_status(booking['booking_id'], 'pending')
-                            st.rerun()
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if st.button(f"✅ Approve Booking", key=f"approve_{booking['booking_id']}"):
+                        update_booking_status(booking['booking_id'], 'approved', admin_notes if admin_notes else None)
+                        st.success(f"Booking #{booking['booking_id']} approved! The client will now confirm.")
+                        st.rerun()
+                    
+                    if st.button(f"❌ Reject / Suspend", key=f"suspend_{booking['booking_id']}"):
+                        update_booking_status(booking['booking_id'], 'suspended', admin_notes if admin_notes else None)
+                        st.warning(f"Booking #{booking['booking_id']} suspended.")
+                        st.rerun()
                 
                 st.markdown("---")
         else:
-            st.info("No booking requests yet")
+            st.info("No pending approvals. All booking requests have been processed.")
+        
+        # Show approved but not yet confirmed bookings
+        st.markdown("---")
+        st.markdown("#### ✅ Approved - Awaiting Client Confirmation")
+        
+        approved_bookings = all_bookings[all_bookings['status'] == 'approved'] if not all_bookings.empty else pd.DataFrame()
+        
+        if not approved_bookings.empty:
+            for _, booking in approved_bookings.iterrows():
+                st.markdown(f"""
+                <div class="booking-card booking-card-approved">
+                    <p><strong>Booking #{booking['booking_id']}</strong> - Approved on {booking['approved_date'][:10] if booking.get('approved_date') else 'N/A'}</p>
+                    <p><strong>Company:</strong> {booking['company_name'] if 'company_name' in booking else 'N/A'}</p>
+                    <p><strong>Stations:</strong> {booking.get('selected_stations', booking['station_name'])}</p>
+                    <p><strong>Budget:</strong> KES {booking['budget_kes']:,.0f}</p>
+                    <p><strong>Status:</strong> <span class="badge-approved">APPROVED - AWAITING CLIENT CONFIRMATION</span></p>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.info("No approved bookings awaiting confirmation.")
         
         st.markdown('</div>', unsafe_allow_html=True)
     
@@ -916,7 +988,6 @@ def show_admin_dashboard():
                 
                 st.markdown("---")
             
-            # Export
             csv = all_leads.to_csv(index=False)
             st.download_button("📥 Export All Leads", csv, f"all_leads_{datetime.now().strftime('%Y%m%d')}.csv")
         else:
@@ -1005,8 +1076,8 @@ def show_client_portal():
     with col5:
         st.markdown(f"""
         <div class="metric-card">
-            <div class="metric-label">⏳ Pending</div>
-            <div class="metric-value">{booking_stats['pending']}</div>
+            <div class="metric-label">⏳ Pending Approval</div>
+            <div class="metric-value">{booking_stats['pending_approval']}</div>
         </div>
         """, unsafe_allow_html=True)
     
@@ -1052,7 +1123,7 @@ def show_client_portal():
             st.info("No campaign data available")
     
     # ========================================================================
-    # TAB 2: Smart Recommendations (FIXED BOOKING FORM)
+    # TAB 2: Smart Recommendations
     # ========================================================================
     with tab2:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
@@ -1061,7 +1132,6 @@ def show_client_portal():
         engine = MediaRecommendationEngine()
         station_db = StationDatabase()
         
-        # Create session state for recommendations if not exists
         if 'generated_recommendations' not in st.session_state:
             st.session_state.generated_recommendations = None
         if 'campaign_params' not in st.session_state:
@@ -1101,7 +1171,6 @@ def show_client_portal():
             }
             st.rerun()
         
-        # Display recommendations if they exist
         if st.session_state.generated_recommendations:
             recommendations = st.session_state.generated_recommendations
             params = st.session_state.campaign_params
@@ -1128,11 +1197,9 @@ def show_client_portal():
                 </div>
                 """, unsafe_allow_html=True)
             
-            # BOOKING FORM - Separated and always visible
             st.markdown("---")
             st.markdown("### 📞 Book Your Campaign")
             
-            # Station selection checkboxes (outside form to prevent disappearing)
             station_options = [f"{r['station_name']} ({r['media_type']})" for r in recommendations[:5]]
             st.markdown("**Select stations to book:**")
             
@@ -1141,7 +1208,6 @@ def show_client_portal():
                 if st.checkbox(station, key=f"station_check_{station}"):
                     selected_stations.append(station)
             
-            # Only show the form if at least one station is selected
             if selected_stations:
                 st.markdown("---")
                 st.markdown("#### Complete Your Booking")
@@ -1171,7 +1237,7 @@ def show_client_portal():
                             if booking_id:
                                 st.success(f"✅ Booking request submitted! Reference: #{booking_id}")
                                 st.balloons()
-                                # Clear recommendations after successful booking
+                                st.info("Your request is now pending admin approval. You will be notified once approved.")
                                 st.session_state.generated_recommendations = None
                                 st.rerun()
                             else:
@@ -1209,7 +1275,7 @@ def show_client_portal():
         st.markdown('</div>', unsafe_allow_html=True)
     
     # ========================================================================
-    # TAB 4: My Bookings
+    # TAB 4: My Bookings (Client View with Approval Workflow)
     # ========================================================================
     with tab4:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
@@ -1221,17 +1287,32 @@ def show_client_portal():
             with col1:
                 st.metric("Total", booking_stats['total'])
             with col2:
-                st.metric("Pending", booking_stats['pending'])
+                st.metric("Pending Approval", booking_stats['pending_approval'])
             with col3:
-                st.metric("Confirmed", booking_stats['confirmed'])
+                st.metric("Approved", booking_stats['approved'])
             with col4:
-                st.metric("Suspended", booking_stats['suspended'])
+                st.metric("Confirmed", booking_stats['confirmed'])
             
             st.markdown("---")
             
             for _, booking in bookings_df.iterrows():
-                border_class = "booking-card-pending" if booking['status'] == 'pending' else "booking-card-confirmed" if booking['status'] == 'confirmed' else "booking-card-suspended"
-                status_badge = "badge-pending" if booking['status'] == 'pending' else "badge-confirmed" if booking['status'] == 'confirmed' else "badge-suspended"
+                # Determine border and badge based on status
+                if booking['status'] == 'pending_approval':
+                    border_class = "booking-card-pending"
+                    status_badge = "badge-pending"
+                    status_text = "PENDING APPROVAL"
+                elif booking['status'] == 'approved':
+                    border_class = "booking-card-approved"
+                    status_badge = "badge-approved"
+                    status_text = "APPROVED - READY FOR CONFIRMATION"
+                elif booking['status'] == 'confirmed':
+                    border_class = "booking-card-confirmed"
+                    status_badge = "badge-confirmed"
+                    status_text = "CONFIRMED"
+                else:
+                    border_class = "booking-card-suspended"
+                    status_badge = "badge-suspended"
+                    status_text = "SUSPENDED"
                 
                 st.markdown(f"""
                 <div class="booking-card {border_class}">
@@ -1239,32 +1320,69 @@ def show_client_portal():
                     <p><strong>Stations:</strong> {booking.get('selected_stations', booking['station_name'])}</p>
                     <p><strong>Budget:</strong> KES {booking['budget_kes']:,.0f} | <strong>Duration:</strong> {booking['duration_days']} days</p>
                     <p><strong>Campaign Goal:</strong> {booking.get('campaign_goal', 'N/A')}</p>
-                    <p><strong>Status:</strong> <span class="{status_badge}">{booking['status'].upper()}</span></p>
-                    <p><strong>Last Updated:</strong> {booking['status_updated_date'][:10] if booking.get('status_updated_date') else 'N/A'}</p>
+                    <p><strong>Status:</strong> <span class="{status_badge}">{status_text}</span></p>
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # Status update buttons
-                st.markdown("**Update Status:**")
+                # Show approval timeline
+                st.markdown("**Approval Status:**")
                 col1, col2, col3 = st.columns(3)
                 
                 with col1:
-                    if booking['status'] != 'confirmed':
-                        if st.button(f"✅ Mark Confirmed", key=f"confirm_{booking['booking_id']}"):
-                            update_booking_status(booking['booking_id'], 'confirmed')
-                            st.rerun()
+                    if booking['status'] != 'pending_approval':
+                        st.markdown("✅ **Request Submitted**")
+                    else:
+                        st.markdown("⏳ **Request Submitted**")
+                    st.caption(booking['request_date'][:10] if booking['request_date'] else 'N/A')
                 
                 with col2:
-                    if booking['status'] != 'suspended':
-                        if st.button(f"⏸️ Suspend", key=f"suspend_{booking['booking_id']}"):
-                            update_booking_status(booking['booking_id'], 'suspended')
-                            st.rerun()
+                    if booking['status'] in ['approved', 'confirmed']:
+                        st.markdown("✅ **Admin Approved**")
+                        st.caption(booking['approved_date'][:10] if booking.get('approved_date') else 'N/A')
+                    elif booking['status'] == 'pending_approval':
+                        st.markdown("⏳ **Pending Approval**")
+                        st.caption("Waiting for admin")
+                    else:
+                        st.markdown("❌ **Not Approved**")
                 
                 with col3:
-                    if booking['status'] != 'pending':
-                        if st.button(f"🔄 Reset to Pending", key=f"reset_{booking['booking_id']}"):
-                            update_booking_status(booking['booking_id'], 'pending')
+                    if booking['status'] == 'confirmed':
+                        st.markdown("✅ **Client Confirmed**")
+                        st.caption(booking['confirmed_date'][:10] if booking.get('confirmed_date') else 'N/A')
+                    elif booking['status'] == 'approved':
+                        st.markdown("⚠️ **Awaiting Your Confirmation**")
+                        st.caption("Ready to confirm")
+                    else:
+                        st.markdown("⏳ **Pending**")
+                
+                # Action buttons based on status
+                if booking['status'] == 'approved':
+                    st.markdown("---")
+                    st.markdown("#### ✅ Your booking has been approved by admin!")
+                    st.markdown("Please confirm to proceed with your campaign.")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button(f"✅ Confirm This Booking", key=f"confirm_{booking['booking_id']}"):
+                            update_booking_status(booking['booking_id'], 'confirmed')
+                            st.success("Booking confirmed! Your campaign will now be scheduled.")
                             st.rerun()
+                    with col2:
+                        if st.button(f"⏸️ Suspend Instead", key=f"suspend_{booking['booking_id']}"):
+                            update_booking_status(booking['booking_id'], 'suspended')
+                            st.warning("Booking suspended. Contact admin for reactivation.")
+                            st.rerun()
+                
+                elif booking['status'] == 'pending_approval':
+                    st.markdown("---")
+                    st.info("⏳ Your booking is pending admin approval. You will be notified once approved.")
+                
+                elif booking['status'] == 'confirmed':
+                    st.markdown("---")
+                    st.success("✅ Your booking is confirmed! Our team will contact you shortly to finalize the campaign schedule.")
+                    
+                    if st.button(f"📞 Request Changes", key=f"request_change_{booking['booking_id']}"):
+                        st.info("Please contact our support team at support@adintelkenya.com to request changes.")
                 
                 st.markdown("---")
         else:
@@ -1279,7 +1397,6 @@ def show_client_portal():
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
         st.markdown("#### 👥 Audience Leads")
         
-        # Demo lead submission
         with st.expander("📝 Demo: Submit a Test Lead", expanded=False):
             test_name = st.text_input("Name", "John Kamau", key="test_name")
             test_email = st.text_input("Email", "john@example.com", key="test_email")
@@ -1327,7 +1444,6 @@ def show_client_portal():
                 
                 st.markdown("---")
             
-            # Lead statistics
             st.markdown("#### Lead Status Summary")
             status_counts = leads_df.groupby('status').size().reset_index(name='count')
             st.dataframe(status_counts, use_container_width=True, hide_index=True)
@@ -1365,6 +1481,6 @@ else:
 
 st.markdown("""
 <div class="footer">
-    <p>Ad Intelligence Kenya | AI-Powered Media Recommendations & Lead Generation</p>
+    <p>Ad Intelligence Kenya | AI-Powered Media Recommendations & Two-Way Approval Workflow</p>
 </div>
 """, unsafe_allow_html=True)
