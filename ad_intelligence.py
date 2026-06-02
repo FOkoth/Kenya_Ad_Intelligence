@@ -1,5 +1,6 @@
 """
-Ad Intelligence Kenya - Complete Platform with Smart Recommendations
+Ad Intelligence Kenya - Complete Platform with Lead Generation
+Features: Smart Recommendations + Client Booking + Audience Response
 """
 import streamlit as st
 import pandas as pd
@@ -9,6 +10,7 @@ import plotly.graph_objects as go
 import sqlite3
 from datetime import datetime, timedelta
 import random
+import uuid
 
 # ============================================================================
 # PAGE CONFIGURATION
@@ -49,6 +51,7 @@ def init_database():
         industry TEXT,
         email TEXT,
         phone TEXT,
+        logo_url TEXT,
         created_date TEXT,
         status TEXT DEFAULT 'active'
     )
@@ -82,7 +85,67 @@ def init_database():
         cost_kes REAL,
         estimated_reach INTEGER,
         log_date TEXT,
+        status TEXT DEFAULT 'planned',
+        booking_reference TEXT,
         FOREIGN KEY (company_id) REFERENCES companies (company_id)
+    )
+    ''')
+    
+    # Booking requests (advertiser expresses interest)
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS booking_requests (
+        booking_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER,
+        station_name TEXT,
+        media_type TEXT,
+        preferred_time TEXT,
+        budget_kes REAL,
+        duration_days INTEGER,
+        target_audience TEXT,
+        contact_name TEXT,
+        contact_email TEXT,
+        contact_phone TEXT,
+        status TEXT DEFAULT 'pending',
+        request_date TEXT,
+        notes TEXT,
+        FOREIGN KEY (company_id) REFERENCES companies (company_id)
+    )
+    ''')
+    
+    # Audience leads (people responding to ads)
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS audience_leads (
+        lead_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER,
+        campaign_id INTEGER,
+        station_name TEXT,
+        lead_name TEXT,
+        lead_email TEXT,
+        lead_phone TEXT,
+        interest_product TEXT,
+        message TEXT,
+        source TEXT,  -- 'TV', 'Radio', 'Digital'
+        created_date TEXT,
+        status TEXT DEFAULT 'new',
+        assigned_to TEXT,
+        FOREIGN KEY (company_id) REFERENCES companies (company_id)
+    )
+    ''')
+    
+    # Ad creatives (for audience to view)
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS ad_creatives (
+        creative_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER,
+        campaign_id INTEGER,
+        title TEXT,
+        description TEXT,
+        offer_text TEXT,
+        call_to_action TEXT,
+        image_url TEXT,
+        start_date TEXT,
+        end_date TEXT,
+        is_active INTEGER DEFAULT 1
     )
     ''')
     
@@ -108,6 +171,7 @@ def init_database():
         budget_kes REAL,
         duration_days INTEGER,
         target_audience TEXT,
+        target_region TEXT,
         recommended_stations TEXT,
         estimated_roas REAL,
         created_date TEXT,
@@ -224,6 +288,14 @@ st.markdown("""
         color: white;
     }
     
+    .lead-card {
+        background: linear-gradient(135deg, #8B5CF6 0%, #6D28D9 100%);
+        border-radius: 12px;
+        padding: 1rem;
+        color: white;
+        margin-bottom: 1rem;
+    }
+    
     .footer {
         text-align: center;
         padding: 1rem;
@@ -251,18 +323,25 @@ st.markdown("""
         color: white;
     }
     
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
+    .booking-card {
+        background: #FFFBEB;
+        border: 1px solid #FDE68A;
+        border-radius: 12px;
+        padding: 1rem;
+        margin-bottom: 1rem;
+    }
     
-    .recommendation-badge {
-        background: #C6A43F;
-        color: #004953;
-        padding: 0.25rem 0.75rem;
+    .badge-new {
+        background: #10B981;
+        color: white;
+        padding: 0.2rem 0.6rem;
         border-radius: 20px;
         font-size: 0.7rem;
-        font-weight: 600;
         display: inline-block;
     }
+    
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -302,34 +381,100 @@ def add_media_log(company_id, station_name, media_type, spot_time, duration, cos
     """Add a new media log entry"""
     conn = sqlite3.connect('ad_intelligence.db')
     cursor = conn.cursor()
+    booking_ref = str(uuid.uuid4())[:8].upper()
     cursor.execute('''
-    INSERT INTO media_logs (company_id, station_name, media_type, spot_time, duration_seconds, cost_kes, estimated_reach, log_date)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (company_id, station_name, media_type, spot_time, duration, cost, reach, datetime.now().isoformat()))
+    INSERT INTO media_logs (company_id, station_name, media_type, spot_time, duration_seconds, cost_kes, estimated_reach, log_date, status, booking_reference)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (company_id, station_name, media_type, spot_time, duration, cost, reach, datetime.now().isoformat(), 'planned', booking_ref))
     conn.commit()
     conn.close()
-    return True
+    return booking_ref
 
-def save_recommendation(company_id, campaign_goal, budget, duration, audience, stations, estimated_roas):
+def save_recommendation(company_id, campaign_goal, budget, duration, audience, region, stations, estimated_roas):
     """Save recommendation for future reference"""
     conn = sqlite3.connect('ad_intelligence.db')
     cursor = conn.cursor()
     cursor.execute('''
-    INSERT INTO recommendations (company_id, campaign_goal, budget_kes, duration_days, target_audience, recommended_stations, estimated_roas, created_date)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (company_id, campaign_goal, budget, duration, audience, stations, estimated_roas, datetime.now().isoformat()))
+    INSERT INTO recommendations (company_id, campaign_goal, budget_kes, duration_days, target_audience, target_region, recommended_stations, estimated_roas, created_date)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (company_id, campaign_goal, budget, duration, audience, region, stations, estimated_roas, datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+    return True
+
+def create_booking_request(company_id, station_name, media_type, preferred_time, budget, duration, audience, contact_name, contact_email, contact_phone, notes=""):
+    """Create a booking request from advertiser"""
+    conn = sqlite3.connect('ad_intelligence.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+    INSERT INTO booking_requests (company_id, station_name, media_type, preferred_time, budget_kes, duration_days, target_audience, contact_name, contact_email, contact_phone, status, request_date, notes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (company_id, station_name, media_type, preferred_time, budget, duration, audience, contact_name, contact_email, contact_phone, 'pending', datetime.now().isoformat(), notes))
+    booking_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return booking_id
+
+def add_audience_lead(company_id, campaign_id, station_name, name, email, phone, product_interest, message, source):
+    """Add a lead from audience responding to ad"""
+    conn = sqlite3.connect('ad_intelligence.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+    INSERT INTO audience_leads (company_id, campaign_id, station_name, lead_name, lead_email, lead_phone, interest_product, message, source, created_date, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (company_id, campaign_id, station_name, name, email, phone, product_interest, message, source, datetime.now().isoformat(), 'new'))
+    lead_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return lead_id
+
+def get_booking_requests(company_id):
+    """Get all booking requests for a company"""
+    conn = sqlite3.connect('ad_intelligence.db')
+    df = pd.read_sql_query('''
+        SELECT * FROM booking_requests 
+        WHERE company_id = ? 
+        ORDER BY request_date DESC
+    ''', conn, params=(company_id,))
+    conn.close()
+    return df
+
+def get_audience_leads(company_id):
+    """Get all audience leads for a company"""
+    conn = sqlite3.connect('ad_intelligence.db')
+    df = pd.read_sql_query('''
+        SELECT * FROM audience_leads 
+        WHERE company_id = ? 
+        ORDER BY created_date DESC
+    ''', conn, params=(company_id,))
+    conn.close()
+    return df
+
+def update_lead_status(lead_id, status):
+    """Update lead status (new, contacted, converted, lost)"""
+    conn = sqlite3.connect('ad_intelligence.db')
+    cursor = conn.cursor()
+    cursor.execute("UPDATE audience_leads SET status = ? WHERE lead_id = ?", (status, lead_id))
+    conn.commit()
+    conn.close()
+    return True
+
+def update_booking_status(booking_id, status):
+    """Update booking request status"""
+    conn = sqlite3.connect('ad_intelligence.db')
+    cursor = conn.cursor()
+    cursor.execute("UPDATE booking_requests SET status = ? WHERE booking_id = ?", (status, booking_id))
     conn.commit()
     conn.close()
     return True
 
 # ============================================================================
-# SMART RECOMMENDATION ENGINE
+# STATION DATABASE WITH REGION FILTERING
 # ============================================================================
-class MediaRecommendationEngine:
-    """Intelligent station recommendation engine"""
+class StationDatabase:
+    """Complete station database with region filtering"""
     
     def __init__(self):
-        # Station database with detailed profiles
         self.stations = {
             "TV": {
                 "Citizen TV": {
@@ -338,11 +483,8 @@ class MediaRecommendationEngine:
                     "cost_per_spot": 250000,
                     "primary_audience": ["Mass Market", "Families", "General"],
                     "age_group": "25-55",
-                    "income_level": "Middle to High",
                     "best_for": ["Brand Awareness", "Mass Market Products", "Telecom", "Banking"],
-                    "language": ["English", "Swahili"],
-                    "price_tier": "Premium",
-                    "peak_times": ["19:30-21:00", "20:00-20:30"]
+                    "price_tier": "Premium"
                 },
                 "KTN": {
                     "region": "National",
@@ -350,11 +492,8 @@ class MediaRecommendationEngine:
                     "cost_per_spot": 200000,
                     "primary_audience": ["Professionals", "News Viewers", "Urban"],
                     "age_group": "30-50",
-                    "income_level": "High",
-                    "best_for": ["News", "Corporate", "Financial Services", "Luxury Goods"],
-                    "language": ["English"],
-                    "price_tier": "Premium",
-                    "peak_times": ["19:00-20:00", "21:00-22:00"]
+                    "best_for": ["News", "Corporate", "Financial Services"],
+                    "price_tier": "Premium"
                 },
                 "NTV": {
                     "region": "National",
@@ -362,11 +501,8 @@ class MediaRecommendationEngine:
                     "cost_per_spot": 220000,
                     "primary_audience": ["General", "Young Adults", "Urban"],
                     "age_group": "20-45",
-                    "income_level": "Middle",
                     "best_for": ["Entertainment", "Retail", "Youth Products"],
-                    "language": ["English"],
-                    "price_tier": "Premium",
-                    "peak_times": ["19:00-20:00", "20:00-21:00"]
+                    "price_tier": "Premium"
                 },
                 "KBC": {
                     "region": "National",
@@ -374,229 +510,107 @@ class MediaRecommendationEngine:
                     "cost_per_spot": 150000,
                     "primary_audience": ["Mass Market", "Rural", "Older Adults"],
                     "age_group": "35-65",
-                    "income_level": "Low to Middle",
-                    "best_for": ["Government", "Public Service", "Agriculture", "Mass Market"],
-                    "language": ["Swahili", "English"],
-                    "price_tier": "Standard",
-                    "peak_times": ["19:00-20:00", "20:00-21:00"]
+                    "best_for": ["Government", "Public Service", "Agriculture"],
+                    "price_tier": "Standard"
                 }
             },
             "Radio": {
-                "Citizen Radio": {
-                    "region": "National",
-                    "reach": 2500000,
-                    "cost_per_spot": 90000,
-                    "primary_audience": ["General", "Talk Radio Listeners", "Urban"],
-                    "age_group": "25-50",
-                    "income_level": "Middle",
-                    "best_for": ["Talk Shows", "News", "Consumer Goods"],
-                    "language": ["English", "Swahili"],
-                    "price_tier": "Premium",
-                    "peak_times": ["06:00-09:00", "16:00-19:00"]
-                },
-                "Radio Jambo": {
-                    "region": "National",
-                    "reach": 2000000,
-                    "cost_per_spot": 75000,
-                    "primary_audience": ["Youth", "Entertainment Seekers", "Urban"],
-                    "age_group": "18-35",
-                    "income_level": "Low to Middle",
-                    "best_for": ["Youth Products", "Music", "Entertainment", "Retail"],
-                    "language": ["Swahili"],
-                    "price_tier": "Standard",
-                    "peak_times": ["07:00-10:00", "16:00-19:00"]
-                },
-                "Classic 105": {
-                    "region": "National",
-                    "reach": 1500000,
-                    "cost_per_spot": 80000,
-                    "primary_audience": ["Professionals", "Adults", "Urban Elite"],
-                    "age_group": "30-50",
-                    "income_level": "High",
-                    "best_for": ["Corporate", "Luxury", "Financial Services", "Automotive"],
-                    "language": ["English"],
-                    "price_tier": "Premium",
-                    "peak_times": ["07:00-09:00", "17:00-19:00"]
-                },
-                "Baraka FM": {
-                    "region": "Coast",
-                    "reach": 600000,
-                    "cost_per_spot": 40000,
-                    "primary_audience": ["Religious", "Coastal Residents"],
-                    "age_group": "25-60",
-                    "income_level": "Low to Middle",
-                    "best_for": ["Religious Products", "Local Services", "Tourism"],
-                    "language": ["Swahili"],
-                    "price_tier": "Economy",
-                    "peak_times": ["05:00-08:00", "18:00-20:00"]
-                },
-                "Ramogi FM": {
-                    "region": "Western",
-                    "reach": 850000,
-                    "cost_per_spot": 35000,
-                    "primary_audience": ["Luo Community", "Vernacular Listeners"],
-                    "age_group": "25-55",
-                    "income_level": "Low to Middle",
-                    "best_for": ["Agriculture", "Local Products", "Community News"],
-                    "language": ["Luo"],
-                    "price_tier": "Economy",
-                    "peak_times": ["06:00-09:00", "18:00-20:00"]
-                },
-                "Inooro FM": {
-                    "region": "Central",
-                    "reach": 1200000,
-                    "cost_per_spot": 45000,
-                    "primary_audience": ["Kikuyu Community", "Vernacular Listeners"],
-                    "age_group": "25-55",
-                    "income_level": "Middle",
-                    "best_for": ["Agriculture", "Real Estate", "Local Business"],
-                    "language": ["Kikuyu"],
-                    "price_tier": "Standard",
-                    "peak_times": ["06:00-09:00", "17:00-20:00"]
-                }
+                "Citizen Radio": {"region": "National", "reach": 2500000, "cost_per_spot": 90000, "primary_audience": ["General", "Talk Radio Listeners"], "best_for": ["Talk Shows", "News"], "price_tier": "Premium"},
+                "Radio Jambo": {"region": "National", "reach": 2000000, "cost_per_spot": 75000, "primary_audience": ["Youth", "Entertainment Seekers"], "best_for": ["Youth Products", "Music"], "price_tier": "Standard"},
+                "Classic 105": {"region": "National", "reach": 1500000, "cost_per_spot": 80000, "primary_audience": ["Professionals", "Urban Elite"], "best_for": ["Corporate", "Luxury"], "price_tier": "Premium"},
+                "Baraka FM": {"region": "Coast", "reach": 600000, "cost_per_spot": 40000, "primary_audience": ["Religious", "Coastal Residents"], "best_for": ["Religious", "Tourism"], "price_tier": "Economy"},
+                "Ramogi FM": {"region": "Western", "reach": 850000, "cost_per_spot": 35000, "primary_audience": ["Luo Community"], "best_for": ["Agriculture", "Local Products"], "price_tier": "Economy"},
+                "Inooro FM": {"region": "Central", "reach": 1200000, "cost_per_spot": 45000, "primary_audience": ["Kikuyu Community"], "best_for": ["Agriculture", "Real Estate"], "price_tier": "Standard"}
             }
         }
-        
-        # Audience-to-station matching weights
-        self.audience_weights = {
-            "Mass Market": {"Citizen TV": 0.9, "KBC": 0.8, "Citizen Radio": 0.7},
-            "Youth (18-35)": {"Radio Jambo": 0.9, "NTV": 0.7, "Citizen TV": 0.6},
-            "Professionals (25-45)": {"KTN": 0.9, "Classic 105": 0.9, "Citizen TV": 0.7},
-            "Rural Population": {"KBC": 0.8, "Ramogi FM": 0.7, "Inooro FM": 0.7},
-            "Urban Consumers": {"Citizen TV": 0.8, "NTV": 0.8, "Classic 105": 0.7},
-            "Affluent Segment": {"KTN": 0.9, "Classic 105": 0.9, "Citizen TV": 0.7}
-        }
     
-    def recommend_stations(self, campaign_goal, budget, duration_days, target_audience, region="National"):
+    def get_stations_by_region(self, region_type):
+        """Get stations based on region preference: Local, National, or Both"""
+        filtered = {"TV": [], "Radio": []}
+        
+        for media_type, stations in self.stations.items():
+            for name, info in stations.items():
+                if region_type == "National" and info["region"] == "National":
+                    filtered[media_type].append({"name": name, **info})
+                elif region_type == "Local" and info["region"] != "National":
+                    filtered[media_type].append({"name": name, **info})
+                elif region_type == "Both":
+                    filtered[media_type].append({"name": name, **info})
+        
+        return filtered
+    
+    def get_local_stations_by_area(self, area):
+        """Get stations for specific local area"""
+        local_stations = []
+        area_lower = area.lower()
+        
+        for media_type, stations in self.stations.items():
+            for name, info in stations.items():
+                if info["region"] != "National":
+                    if (area_lower in ["coast", "mombasa"] and info["region"] == "Coast") or \
+                       (area_lower in ["western", "kisumu", "luo"] and info["region"] == "Western") or \
+                       (area_lower in ["central", "kikuyu"] and info["region"] == "Central"):
+                        local_stations.append({"name": name, "media_type": media_type, **info})
+        
+        return local_stations
+    
+    def get_all_local_areas(self):
+        """Get list of available local areas"""
+        return ["Coast Region (Mombasa)", "Western Region (Kisumu)", "Central Region (Nyeri)"]
+
+# ============================================================================
+# SMART RECOMMENDATION ENGINE
+# ============================================================================
+class MediaRecommendationEngine:
+    """Intelligent station recommendation engine"""
+    
+    def __init__(self):
+        self.station_db = StationDatabase()
+    
+    def recommend_stations(self, campaign_goal, budget, duration_days, target_audience, region_type, selected_area=None):
         """Generate station recommendations based on all inputs"""
         
-        recommendations = []
-        available_budget = budget
+        # Get stations based on region preference
+        available_stations = self.station_db.get_stations_by_region(region_type)
         
-        # Calculate total available spots based on budget
-        for media_type in ["TV", "Radio"]:
-            for station_name, station in self.stations[media_type].items():
-                # Skip if region doesn't match
-                if region != "National" and station["region"] != region and station["region"] != "National":
-                    continue
-                
-                # Calculate match score
+        recommendations = []
+        
+        for media_type, stations in available_stations.items():
+            for station in stations:
                 score = 0
                 
                 # Goal matching
-                if campaign_goal in station["best_for"]:
+                if campaign_goal in station.get("best_for", []):
                     score += 30
-                elif any(goal in station["best_for"] for goal in ["Brand Awareness", "Mass Market"]):
-                    score += 15
                 
                 # Audience matching
-                if target_audience in station["primary_audience"]:
+                if target_audience in station.get("primary_audience", []):
                     score += 30
-                elif target_audience in self.audience_weights and station_name in self.audience_weights[target_audience]:
-                    score += self.audience_weights[target_audience][station_name] * 30
                 
                 # Budget matching
-                if station["price_tier"] == "Economy" and available_budget < 300000:
+                if station["price_tier"] == "Economy" and budget < 300000:
                     score += 20
-                elif station["price_tier"] == "Standard" and 200000 <= available_budget <= 600000:
+                elif station["price_tier"] == "Standard" and 200000 <= budget <= 600000:
                     score += 20
-                elif station["price_tier"] == "Premium" and available_budget > 500000:
+                elif station["price_tier"] == "Premium" and budget > 500000:
                     score += 20
                 
-                # Duration bonus - longer campaigns get better recommendations
-                if duration_days > 14:
-                    score += 10
-                
-                if score > 20:  # Only include relevant stations
-                    # Calculate how many spots the budget allows
-                    cost_per_spot = station["cost_per_spot"]
-                    max_spots = int(available_budget / cost_per_spot) if cost_per_spot > 0 else 0
-                    
+                if score > 20:
+                    max_spots = int(budget / station["cost_per_spot"]) if station["cost_per_spot"] > 0 else 0
                     recommendations.append({
-                        "station_name": station_name,
+                        "station_name": station["name"],
                         "media_type": media_type,
                         "reach": station["reach"],
-                        "cost_per_spot": cost_per_spot,
+                        "cost_per_spot": station["cost_per_spot"],
                         "recommended_spots": min(max_spots, 7 if duration_days <= 7 else 14),
-                        "primary_audience": station["primary_audience"],
-                        "best_for": station["best_for"],
+                        "best_for": station.get("best_for", []),
                         "score": score,
-                        "peak_times": station["peak_times"],
-                        "price_tier": station["price_tier"]
+                        "price_tier": station["price_tier"],
+                        "region": station["region"]
                     })
         
-        # Sort by score and return top recommendations
         recommendations.sort(key=lambda x: x["score"], reverse=True)
         return recommendations[:5]
-    
-    def calculate_estimated_roas(self, recommendations, budget, industry):
-        """Estimate potential ROAS based on recommendations"""
-        
-        base_roas = 1.5  # Conservative baseline
-        
-        # Industry multipliers
-        industry_multipliers = {
-            "Telecommunications": 1.3,
-            "Financial Services": 1.2,
-            "Tourism": 1.4,
-            "Automotive": 1.1,
-            "Retail": 1.0,
-            "Agriculture": 1.2
-        }
-        
-        industry_mult = industry_multipliers.get(industry, 1.0)
-        
-        # Recommendation quality multiplier
-        avg_score = sum(r["score"] for r in recommendations) / len(recommendations) if recommendations else 50
-        quality_mult = 0.5 + (avg_score / 100)
-        
-        estimated_roas = base_roas * industry_mult * quality_mult
-        
-        # Budget efficiency
-        if budget > 1000000:
-            estimated_roas *= 1.1
-        elif budget < 200000:
-            estimated_roas *= 0.9
-        
-        return round(estimated_roas, 2)
-
-# ============================================================================
-# KENYAN MEDIA DIRECTORY
-# ============================================================================
-def get_kenyan_media():
-    return {
-        "Nairobi Metropolitan": {
-            "TV": [
-                {"name": "Citizen TV", "reach": "5,000,000", "format": "General", "price_tier": "Premium"},
-                {"name": "KTN", "reach": "3,000,000", "format": "News", "price_tier": "Premium"},
-                {"name": "NTV", "reach": "2,800,000", "format": "News/Entertainment", "price_tier": "Premium"},
-                {"name": "KBC", "reach": "2,000,000", "format": "Public", "price_tier": "Standard"},
-            ],
-            "Radio": [
-                {"name": "Citizen Radio", "reach": "2,500,000", "format": "News/Talk", "price_tier": "Premium"},
-                {"name": "Radio Jambo", "reach": "2,000,000", "format": "Entertainment", "price_tier": "Standard"},
-                {"name": "Classic 105", "reach": "1,500,000", "format": "Adult Contemporary", "price_tier": "Premium"},
-            ]
-        },
-        "Coast Region": {
-            "Radio": [
-                {"name": "Baraka FM", "reach": "600,000", "format": "Religious/Talk", "price_tier": "Economy"},
-                {"name": "Milele FM", "reach": "450,000", "format": "Entertainment", "price_tier": "Economy"},
-            ]
-        },
-        "Western Region": {
-            "Radio": [
-                {"name": "Ramogi FM", "reach": "850,000", "format": "Vernacular", "price_tier": "Economy"},
-                {"name": "Lake Victoria FM", "reach": "700,000", "format": "Vernacular", "price_tier": "Economy"},
-            ]
-        },
-        "Central Region": {
-            "Radio": [
-                {"name": "Inooro FM", "reach": "1,200,000", "format": "Vernacular", "price_tier": "Standard"},
-                {"name": "Kameme FM", "reach": "1,000,000", "format": "Vernacular", "price_tier": "Standard"},
-            ]
-        }
-    }
 
 # ============================================================================
 # LOGIN SYSTEM
@@ -691,8 +705,7 @@ def show_admin_dashboard():
             campaign_roas = df.groupby('campaign_name')['roas'].mean().reset_index()
             campaign_roas = campaign_roas.sort_values('roas', ascending=True)
             fig = px.bar(campaign_roas, x='roas', y='campaign_name', orientation='h',
-                        color='roas', color_continuous_scale='RdYlGn',
-                        labels={'roas': 'ROAS (x)', 'campaign_name': ''})
+                        color='roas', color_continuous_scale='RdYlGn')
             fig.add_vline(x=2.0, line_dash="dash", line_color="#EF4444")
             fig.update_layout(height=400, plot_bgcolor='white', showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
@@ -710,7 +723,7 @@ def show_admin_dashboard():
         st.info("No campaign data available")
 
 # ============================================================================
-# CLIENT PORTAL WITH SMART RECOMMENDATIONS
+# CLIENT PORTAL WITH LEAD GENERATION
 # ============================================================================
 def show_client_portal():
     company_id = st.session_state.company_id
@@ -732,8 +745,13 @@ def show_client_portal():
     
     df = get_company_data(company_id)
     logs_df = get_company_logs(company_id)
+    bookings_df = get_booking_requests(company_id)
+    leads_df = get_audience_leads(company_id)
     
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Performance", "🎯 Smart Recommendations", "📺 TV/Radio Logs", "📈 Media Directory", "⚙️ Settings"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📊 Performance", "🎯 Smart Recommendations", "📺 TV/Radio Logs", 
+        "📋 Booking Requests", "👥 Audience Leads", "📈 Media Directory"
+    ])
     
     # ========================================================================
     # TAB 1: Performance Dashboard
@@ -771,14 +789,17 @@ def show_client_portal():
             st.info("No campaign data available")
     
     # ========================================================================
-    # TAB 2: SMART RECOMMENDATIONS (Enhanced)
+    # TAB 2: SMART RECOMMENDATIONS (with Call-to-Action)
     # ========================================================================
     with tab2:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
         st.markdown("#### 🎯 AI-Powered Media Recommendation Engine")
         st.markdown("Get intelligent station recommendations based on your campaign parameters")
         
-        # Recommendation Input Form
+        engine = MediaRecommendationEngine()
+        station_db = StationDatabase()
+        
+        # Campaign Parameters
         st.markdown("##### 📋 Campaign Parameters")
         
         col1, col2 = st.columns(2)
@@ -786,140 +807,98 @@ def show_client_portal():
         with col1:
             campaign_goal = st.selectbox(
                 "Campaign Goal",
-                ["Brand Awareness", "Lead Generation", "Sales", "Customer Retention", "Product Launch"],
-                help="What is the primary objective of this campaign?"
+                ["Brand Awareness", "Lead Generation", "Sales", "Customer Retention", "Product Launch"]
             )
             
-            budget = st.number_input(
-                "Total Budget (KES)", 
-                min_value=100000, 
-                max_value=10000000, 
-                value=500000, 
-                step=50000,
-                help="Your total campaign budget"
-            )
+            budget = st.number_input("Total Budget (KES)", min_value=100000, max_value=10000000, value=500000, step=50000)
             
-            duration = st.select_slider(
-                "Campaign Duration (Days)",
-                options=[7, 14, 21, 30, 45, 60],
-                value=14,
-                help="How long will the campaign run?"
-            )
+            duration = st.select_slider("Campaign Duration (Days)", options=[7, 14, 21, 30, 45, 60], value=14)
         
         with col2:
             target_audience = st.selectbox(
                 "Target Audience",
-                ["Mass Market", "Youth (18-35)", "Professionals (25-45)", 
-                 "Rural Population", "Urban Consumers", "Affluent Segment"],
-                help="Who are you trying to reach?"
+                ["Mass Market", "Youth (18-35)", "Professionals (25-45)", "Rural Population", "Urban Consumers", "Affluent Segment"]
             )
             
-            target_region = st.selectbox(
-                "Target Region",
-                ["National", "Nairobi Metropolitan", "Coast Region", "Western Region", "Central Region"],
-                help="Which geographic area are you targeting?"
+            region_type = st.selectbox(
+                "Target Region Type",
+                ["National", "Local", "Both"],
+                help="National: All Kenya, Local: Specific region, Both: Mix of national and local"
             )
             
-            seasonality = st.selectbox(
-                "Campaign Season",
-                ["Regular", "Peak Season (Dec-Jan)", "Low Season", "Holiday Period"],
-                help="Consider seasonal factors that affect advertising effectiveness"
-            )
-        
-        # Industry-specific insights
-        st.markdown("##### 💡 Industry Insights")
-        
-        industry_insights = {
-            "Telecommunications": "📱 Telco ads perform best on Citizen TV and Radio Jambo. Peak viewership is 7-9 PM weekdays.",
-            "Financial Services": "🏦 Banking ads see highest engagement on KTN and Classic 105. Professional audiences respond best.",
-            "Tourism": "🏖️ Tourism campaigns work well on Citizen TV and Baraka FM. Coast region stations are ideal for local targeting.",
-            "Automotive": "🚗 Auto ads perform well on Classic 105 and NTV. Weekend slots have higher conversion rates.",
-            "Retail": "🛍️ Retail campaigns get best ROI on Radio Jambo and NTV. Evening slots drive immediate action.",
-            "General": "📺 Mass market campaigns perform consistently across major stations. Consider frequency over reach."
-        }
-        
-        insight = industry_insights.get(company_industry, industry_insights["General"])
-        st.info(insight)
+            selected_area = None
+            if region_type in ["Local", "Both"]:
+                selected_area = st.selectbox("Select Local Area", station_db.get_all_local_areas())
         
         if st.button("🔍 Generate Smart Recommendations", use_container_width=True):
-            # Initialize recommendation engine
-            engine = MediaRecommendationEngine()
-            
             # Get recommendations
             recommendations = engine.recommend_stations(
                 campaign_goal=campaign_goal,
                 budget=budget,
                 duration_days=duration,
                 target_audience=target_audience,
-                region=target_region
+                region_type=region_type,
+                selected_area=selected_area
             )
             
-            estimated_roas = engine.calculate_estimated_roas(recommendations, budget, company_industry)
+            estimated_roas = 2.5  # Simplified for demo
             
             # Save recommendation
             station_names = ", ".join([r["station_name"] for r in recommendations[:3]])
-            save_recommendation(company_id, campaign_goal, budget, duration, target_audience, station_names, estimated_roas)
+            save_recommendation(company_id, campaign_goal, budget, duration, target_audience, region_type, station_names, estimated_roas)
             
             st.markdown("---")
             st.markdown("### 📊 Your Personalized Media Plan")
             
-            # ROAS Prediction Card
+            # ROAS Prediction
             st.markdown(f"""
             <div class="success-card">
-                <h4 style="margin:0 0 0.5rem 0;">📈 Predicted Campaign Performance</h4>
+                <h4 style="margin:0 0 0.5rem 0;">📈 Estimated Campaign Performance</h4>
                 <p style="font-size:1.5rem; margin:0;"><strong>Estimated ROAS: {estimated_roas}x</strong></p>
                 <p style="margin:0; opacity:0.9;">Based on your {campaign_goal} campaign targeting {target_audience}</p>
             </div>
             """, unsafe_allow_html=True)
             
             st.markdown("---")
+            st.markdown("### 🏆 Recommended Stations")
             
-            # Display top 3 recommendations prominently
-            st.markdown("### 🏆 Top Recommended Stations")
+            selected_stations = []
             
             for idx, rec in enumerate(recommendations[:3]):
-                price_icon = "🟢" if rec["price_tier"] == "Economy" else "🟡" if rec["price_tier"] == "Standard" else "🔴"
-                
                 with st.container():
-                    st.markdown(f"""
-                    <div class="rec-card">
-                        <h4>#{idx+1} {rec['station_name']} ({rec['media_type']}) {price_icon} {rec['price_tier']}</h4>
-                        <p><strong>📊 Reach:</strong> {rec['reach']:,} | <strong>💰 Cost per spot:</strong> KES {rec['cost_per_spot']:,}</p>
-                        <p><strong>🎯 Best For:</strong> {', '.join(rec['best_for'][:3])}</p>
-                        <p><strong>👥 Primary Audience:</strong> {', '.join(rec['primary_audience'][:2])}</p>
-                        <p><strong>⏰ Recommended Times:</strong> {', '.join(rec['peak_times'][:2])}</p>
-                        <p><strong>📺 Recommended Spots:</strong> {rec['recommended_spots']} per day</p>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    col_a, col_b = st.columns([3, 1])
                     
-                    # Budget calculation
-                    total_cost = rec["cost_per_spot"] * rec["recommended_spots"] * duration
-                    st.caption(f"💰 Estimated campaign cost on {rec['station_name']}: KES {total_cost:,.0f} for {duration} days")
+                    with col_a:
+                        price_icon = "🟢" if rec["price_tier"] == "Economy" else "🟡" if rec["price_tier"] == "Standard" else "🔴"
+                        st.markdown(f"""
+                        <div class="rec-card">
+                            <h4>#{idx+1} {rec['station_name']} ({rec['media_type']}) {price_icon} {rec['price_tier']}</h4>
+                            <p><strong>📊 Reach:</strong> {rec['reach']:,} | <strong>💰 Cost per spot:</strong> KES {rec['cost_per_spot']:,}</p>
+                            <p><strong>🎯 Best For:</strong> {', '.join(rec['best_for'][:2])}</p>
+                            <p><strong>📺 Recommended Spots:</strong> {rec['recommended_spots']} per day</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    with col_b:
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        if st.button(f"📞 Book {rec['station_name']}", key=f"book_{rec['station_name']}_{idx}"):
+                            st.session_state.selected_station = rec
+                            st.session_state.show_booking_form = True
+                            st.rerun()
+                    
+                    selected_stations.append(rec)
             
-            # Budget allocation recommendation
+            # Budget breakdown
             st.markdown("---")
             st.markdown("### 💰 Recommended Budget Allocation")
             
             total_recommended_cost = sum(r["cost_per_spot"] * r["recommended_spots"] * duration for r in recommendations[:3])
             
             if total_recommended_cost > budget:
-                st.warning(f"⚠️ Your budget (KES {budget:,.0f}) is lower than the recommended plan (KES {total_recommended_cost:,.0f}). Consider focusing on 1-2 stations.")
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown("**Option 1: Focus on Top Station**")
-                    st.markdown(f"Run campaign on {recommendations[0]['station_name']} only")
-                    st.markdown(f"Estimated cost: KES {recommendations[0]['cost_per_spot'] * recommendations[0]['recommended_spots'] * duration:,.0f}")
-                with col2:
-                    st.markdown("**Option 2: Reduce Frequency**")
-                    st.markdown(f"Reduce spots from {recommendations[0]['recommended_spots']} to {max(2, recommendations[0]['recommended_spots']//2)} per day")
-                    reduced_cost = recommendations[0]['cost_per_spot'] * max(2, recommendations[0]['recommended_spots']//2) * duration
-                    st.markdown(f"Estimated cost: KES {reduced_cost:,.0f}")
+                st.warning(f"⚠️ Your budget (KES {budget:,.0f}) is lower than the recommended plan (KES {total_recommended_cost:,.0f}).")
             else:
-                st.success(f"✅ Your budget of KES {budget:,.0f} is sufficient for the recommended {len(recommendations[:3])} stations")
+                st.success(f"✅ Your budget of KES {budget:,.0f} is sufficient for the recommended stations")
                 
-                # Budget breakdown
-                st.markdown("#### Budget Breakdown")
                 breakdown_data = []
                 for rec in recommendations[:3]:
                     rec_cost = rec["cost_per_spot"] * rec["recommended_spots"] * duration
@@ -930,27 +909,80 @@ def show_client_portal():
                         "Total Cost": f"KES {rec_cost:,.0f}",
                         "Percentage": f"{(rec_cost/budget)*100:.0f}%"
                     })
-                
                 st.dataframe(pd.DataFrame(breakdown_data), use_container_width=True, hide_index=True)
             
-            # Implementation button
+            # Call to Action - Express Interest
             st.markdown("---")
-            if st.button("📺 Generate Media Logs from This Plan", use_container_width=True):
-                for rec in recommendations[:2]:  # Generate for top 2 stations
-                    for day in range(min(duration, 7)):  # Generate for first week
-                        spot_time = (datetime.now() + timedelta(days=day)).strftime("%Y-%m-%d") + " 19:30:00"
-                        add_media_log(
+            st.markdown("### 📞 Ready to Launch?")
+            st.markdown("Express your interest and our media buying team will contact you within 24 hours.")
+            
+            with st.form("booking_interest_form"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    contact_name = st.text_input("Your Name", placeholder="John Doe")
+                    contact_email = st.text_input("Email Address", placeholder="john@company.com")
+                with col2:
+                    contact_phone = st.text_input("Phone Number", placeholder="+254 XXX XXX XXX")
+                    preferred_launch = st.date_input("Preferred Launch Date", min_value=datetime.now().date())
+                
+                additional_notes = st.text_area("Additional Notes or Requirements", placeholder="Any specific requirements for your campaign...")
+                
+                if st.form_submit_button("📞 Express Interest - We'll Contact You", use_container_width=True):
+                    if contact_name and contact_email and contact_phone:
+                        booking_id = create_booking_request(
                             company_id, 
-                            rec["station_name"], 
-                            rec["media_type"], 
-                            spot_time, 
-                            30, 
-                            rec["cost_per_spot"], 
-                            rec["reach"]
+                            recommendations[0]["station_name"] if recommendations else "Multiple Stations",
+                            recommendations[0]["media_type"] if recommendations else "Mixed",
+                            preferred_launch.strftime("%Y-%m-%d"),
+                            budget, duration, target_audience,
+                            contact_name, contact_email, contact_phone,
+                            additional_notes
                         )
-                st.success(f"✅ Media logs generated for {len(recommendations[:2])} stations. Check the TV/Radio Logs tab.")
+                        st.success(f"✅ Thank you! Your booking request (Ref: #{booking_id}) has been submitted. Our team will contact you within 24 hours.")
+                        st.balloons()
+                    else:
+                        st.error("Please fill in all required fields (Name, Email, Phone)")
         
         st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Booking form modal (shown when user clicks Book)
+        if st.session_state.get('show_booking_form', False):
+            with st.expander("📞 Complete Your Booking Request", expanded=True):
+                selected = st.session_state.selected_station
+                
+                with st.form("direct_booking_form"):
+                    st.markdown(f"**Station:** {selected['station_name']} ({selected['media_type']})")
+                    st.markdown(f"**Cost per spot:** KES {selected['cost_per_spot']:,}")
+                    st.markdown(f"**Recommended spots/day:** {selected['recommended_spots']}")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        contact_name = st.text_input("Your Name*")
+                        contact_email = st.text_input("Email Address*")
+                    with col2:
+                        contact_phone = st.text_input("Phone Number*")
+                        num_spots = st.number_input("Number of Spots per Day", min_value=1, max_value=20, value=selected['recommended_spots'])
+                    
+                    campaign_details = st.text_area("Campaign Details", placeholder="Tell us about your campaign...")
+                    
+                    if st.form_submit_button("Submit Booking Request"):
+                        if contact_name and contact_email and contact_phone:
+                            total_cost = selected['cost_per_spot'] * num_spots * duration
+                            booking_id = create_booking_request(
+                                company_id, selected['station_name'], selected['media_type'],
+                                datetime.now().strftime("%Y-%m-%d"), total_cost, duration,
+                                target_audience, contact_name, contact_email, contact_phone,
+                                campaign_details
+                            )
+                            st.success(f"✅ Booking request submitted! Reference: #{booking_id}")
+                            st.session_state.show_booking_form = False
+                            st.rerun()
+                        else:
+                            st.error("Please fill in all required fields")
+                
+                if st.button("Cancel"):
+                    st.session_state.show_booking_form = False
+                    st.rerun()
     
     # ========================================================================
     # TAB 3: TV/Radio Logs
@@ -972,17 +1004,7 @@ def show_client_portal():
             with col3:
                 st.metric("Total Reach", f"{total_reach:,.0f}")
             
-            station_summary = logs_df.groupby('station_name').agg({
-                'cost_kes': 'sum', 'estimated_reach': 'sum', 'duration_seconds': 'count'
-            }).reset_index()
-            station_summary.columns = ['Station', 'Total Cost', 'Total Reach', 'Spots']
-            st.dataframe(station_summary, use_container_width=True)
-            
-            # Display recent logs
-            st.markdown("#### Recent Airtime Logs")
-            display_df = logs_df[['station_name', 'media_type', 'spot_time', 'duration_seconds', 'cost_kes', 'estimated_reach']].head(10)
-            display_df.columns = ['Station', 'Type', 'Time', 'Duration', 'Cost (KES)', 'Est. Reach']
-            st.dataframe(display_df, use_container_width=True)
+            st.dataframe(logs_df[['station_name', 'media_type', 'spot_time', 'cost_kes', 'status', 'booking_reference']].head(10), use_container_width=True)
             
             csv = logs_df.to_csv(index=False)
             st.download_button("📥 Export All Logs", csv, f"media_logs_{datetime.now().strftime('%Y%m%d')}.csv")
@@ -990,44 +1012,116 @@ def show_client_portal():
             st.info("No airtime logs yet. Use the Smart Recommendations tab to generate your first media plan.")
         
         st.markdown('</div>', unsafe_allow_html=True)
-        
-        with st.expander("➕ Manually Add Airtime Log"):
-            col1, col2 = st.columns(2)
-            with col1:
-                media = get_kenyan_media()
-                all_stations = []
-                for region in media.values():
-                    if "TV" in region:
-                        all_stations.extend([(s['name'], 'TV') for s in region["TV"]])
-                    if "Radio" in region:
-                        all_stations.extend([(s['name'], 'Radio') for s in region["Radio"]])
-                
-                station_names = [s[0] for s in all_stations]
-                station = st.selectbox("Station", station_names)
-                media_type = next((s[1] for s in all_stations if s[0] == station), "TV")
-                spot_time = st.text_input("Time (YYYY-MM-DD HH:MM:SS)", datetime.now().strftime("%Y-%m-%d 19:30:00"))
-            with col2:
-                duration = st.number_input("Duration (sec)", 15, 60, 30)
-                
-                # Auto-populate cost based on station
-                station_costs = {
-                    'Citizen TV': 250000, 'KTN': 200000, 'NTV': 220000, 'KBC': 150000,
-                    'Citizen Radio': 90000, 'Radio Jambo': 75000, 'Classic 105': 80000,
-                    'Baraka FM': 40000, 'Milele FM': 35000, 'Ramogi FM': 35000,
-                    'Inooro FM': 45000, 'Kameme FM': 40000
-                }
-                cost = st.number_input("Cost (KES)", 10000, 500000, station_costs.get(station, 50000))
-                reach = st.number_input("Est. Reach", 10000, 5000000, 500000)
-            
-            if st.button("Add Log"):
-                add_media_log(company_id, station, media_type, spot_time, duration, cost, reach)
-                st.success("Log added!")
-                st.rerun()
     
     # ========================================================================
-    # TAB 4: Media Directory
+    # TAB 4: Booking Requests
     # ========================================================================
     with tab4:
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        st.markdown("#### 📋 Your Booking Requests")
+        
+        if not bookings_df.empty:
+            for _, booking in bookings_df.iterrows():
+                status_color = "🟡" if booking['status'] == 'pending' else "🟢" if booking['status'] == 'confirmed' else "🔴"
+                st.markdown(f"""
+                <div class="booking-card">
+                    <p><strong>{status_color} Booking #{booking['booking_id']}</strong> - {booking['request_date'][:10]}</p>
+                    <p><strong>Station:</strong> {booking['station_name']} ({booking['media_type']})</p>
+                    <p><strong>Budget:</strong> KES {booking['budget_kes']:,.0f} | <strong>Duration:</strong> {booking['duration_days']} days</p>
+                    <p><strong>Contact:</strong> {booking['contact_name']} - {booking['contact_email']} - {booking['contact_phone']}</p>
+                    <p><strong>Status:</strong> <span class="badge-new">{booking['status'].upper()}</span></p>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.info("No booking requests yet. Generate a media plan and express interest.")
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    # ========================================================================
+    # TAB 5: Audience Leads (People responding to ads)
+    # ========================================================================
+    with tab5:
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        st.markdown("#### 👥 Audience Leads")
+        st.markdown("People who have responded to your advertisements")
+        
+        # Lead generation form for audience
+        with st.expander("📱 Share Your Campaign Landing Page / Response Link", expanded=False):
+            st.markdown("""
+            **Provide a way for your audience to respond to your ads:**
+            
+            You can:
+            1. **SMS Short Code** - e.g., "Send 'SAF' to 12345"
+            2. **WhatsApp Link** - e.g., "https://wa.me/254700000000?text=I'm%20interested"
+            3. **Landing Page URL** - e.g., "https://yourcampaign.com/respond"
+            4. **QR Code** - Generate and display on your ads
+            """)
+            
+            response_method = st.selectbox("Response Method", ["SMS", "WhatsApp", "Landing Page", "QR Code"])
+            response_value = st.text_input("Your Response Contact/Link")
+            
+            if st.button("Save Response Settings"):
+                st.success("Response settings saved! Share this with your audience.")
+        
+        st.markdown("---")
+        
+        # Display incoming leads
+        if not leads_df.empty:
+            st.markdown(f"#### New Leads ({len(leads_df[leads_df['status'] == 'new'])} unread)")
+            
+            for _, lead in leads_df.iterrows():
+                with st.container():
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        st.markdown(f"""
+                        **{lead['lead_name']}** - {lead['lead_phone']} | {lead['lead_email']}
+                        - **Interested in:** {lead['interest_product']}
+                        - **Source:** {lead['source']} | **Date:** {lead['created_date'][:10]}
+                        - **Message:** {lead['message'][:100]}...
+                        """)
+                    with col2:
+                        if lead['status'] == 'new':
+                            if st.button(f"Mark Contacted", key=f"mark_{lead['lead_id']}"):
+                                update_lead_status(lead['lead_id'], 'contacted')
+                                st.rerun()
+                        elif lead['status'] == 'contacted':
+                            st.caption("Contacted - pending conversion")
+                        elif lead['status'] == 'converted':
+                            st.caption("✅ Converted to customer")
+            
+            # Lead statistics
+            st.markdown("---")
+            st.markdown("#### Lead Statistics")
+            
+            lead_stats = leads_df.groupby('status').size().reset_index(name='count')
+            st.dataframe(lead_stats, use_container_width=True, hide_index=True)
+            
+            # Export leads
+            csv = leads_df.to_csv(index=False)
+            st.download_button("📥 Export All Leads", csv, f"audience_leads_{datetime.now().strftime('%Y%m%d')}.csv")
+        else:
+            st.info("No audience leads yet. When people respond to your ads, they will appear here.")
+            
+            # Demo lead form (for testing)
+            with st.expander("📝 Demo: Submit a Test Lead"):
+                st.markdown("This simulates an audience member responding to your ad.")
+                test_name = st.text_input("Name", "John Kamau")
+                test_email = st.text_input("Email", "john@example.com")
+                test_phone = st.text_input("Phone", "+254712345678")
+                test_interest = st.text_input("Interested Product", "Your Product/Service")
+                test_message = st.text_area("Message", "I saw your ad and I'm interested!")
+                
+                if st.button("Submit Test Lead"):
+                    add_audience_lead(company_id, 1, "Test Campaign", test_name, test_email, test_phone, test_interest, test_message, "Website")
+                    st.success("Test lead submitted! Check the Audience Leads tab.")
+                    st.rerun()
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    # ========================================================================
+    # TAB 6: Media Directory
+    # ========================================================================
+    with tab6:
         media = get_kenyan_media()
         selected_region = st.selectbox("Select Region", list(media.keys()))
         
@@ -1050,43 +1144,52 @@ def show_client_portal():
                         st.write(f"**Format:** {radio['format']}")
                         tier_icon = "🔴" if radio['price_tier'] == "Premium" else "🟡" if radio['price_tier'] == "Standard" else "🟢"
                         st.write(f"**Price Tier:** {tier_icon} {radio['price_tier']}")
-    
-    # ========================================================================
-    # TAB 5: Settings
-    # ========================================================================
-    with tab5:
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("#### ⚙️ Account Settings")
-        
-        st.markdown(f"**Company:** {company_name}")
-        st.markdown(f"**Industry:** {company_industry}")
-        
-        st.markdown("---")
-        st.markdown("#### 📊 Past Recommendations")
-        
-        conn = sqlite3.connect('ad_intelligence.db')
-        past_recs = pd.read_sql_query('''
-            SELECT created_date, campaign_goal, budget_kes, duration_days, target_audience, recommended_stations, estimated_roas
-            FROM recommendations 
-            WHERE company_id = ?
-            ORDER BY created_date DESC
-            LIMIT 5
-        ''', conn, params=(company_id,))
-        conn.close()
-        
-        if not past_recs.empty:
-            past_recs.columns = ['Date', 'Goal', 'Budget', 'Duration', 'Audience', 'Stations', 'Est. ROAS']
-            st.dataframe(past_recs, use_container_width=True, hide_index=True)
-        else:
-            st.info("No past recommendations. Generate your first media plan in the Smart Recommendations tab.")
-        
-        st.markdown('</div>', unsafe_allow_html=True)
+
+# ============================================================================
+# KENYAN MEDIA DIRECTORY
+# ============================================================================
+def get_kenyan_media():
+    return {
+        "Nairobi Metropolitan": {
+            "TV": [
+                {"name": "Citizen TV", "reach": "5,000,000", "format": "General", "price_tier": "Premium"},
+                {"name": "KTN", "reach": "3,000,000", "format": "News", "price_tier": "Premium"},
+                {"name": "NTV", "reach": "2,800,000", "format": "News/Entertainment", "price_tier": "Premium"},
+                {"name": "KBC", "reach": "2,000,000", "format": "Public", "price_tier": "Standard"},
+            ],
+            "Radio": [
+                {"name": "Citizen Radio", "reach": "2,500,000", "format": "News/Talk", "price_tier": "Premium"},
+                {"name": "Radio Jambo", "reach": "2,000,000", "format": "Entertainment", "price_tier": "Standard"},
+                {"name": "Classic 105", "reach": "1,500,000", "format": "Adult Contemporary", "price_tier": "Premium"},
+            ]
+        },
+        "Coast Region": {
+            "Radio": [
+                {"name": "Baraka FM", "reach": "600,000", "format": "Religious/Talk", "price_tier": "Economy"},
+                {"name": "Milele FM", "reach": "450,000", "format": "Entertainment", "price_tier": "Economy"},
+            ]
+        },
+        "Western Region": {
+            "Radio": [
+                {"name": "Ramogi FM", "reach": "850,000", "format": "Vernacular", "price_tier": "Economy"},
+                {"name": "Lake Victoria FM", "reach": "700,000", "format": "Vernacular", "price_tier": "Economy"},
+            ]
+        },
+        "Central Region": {
+            "Radio": [
+                {"name": "Inooro FM", "reach": "1,200,000", "format": "Vernacular", "price_tier": "Standard"},
+                {"name": "Kameme FM", "reach": "1,000,000", "format": "Vernacular", "price_tier": "Standard"},
+            ]
+        }
+    }
 
 # ============================================================================
 # MAIN APP ROUTING
 # ============================================================================
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
+    st.session_state.show_booking_form = False
+    st.session_state.selected_station = None
 
 if st.session_state.logged_in:
     if st.session_state.role == 'admin':
@@ -1099,6 +1202,8 @@ if st.session_state.logged_in:
         st.markdown("---")
         if st.button("🚪 Logout", use_container_width=True):
             st.session_state.logged_in = False
+            st.session_state.show_booking_form = False
+            st.session_state.selected_station = None
             st.rerun()
 else:
     show_login()
@@ -1106,6 +1211,6 @@ else:
 # Footer
 st.markdown("""
 <div class="footer">
-    <p>Ad Intelligence Kenya | AI-Powered Media Recommendations</p>
+    <p>Ad Intelligence Kenya | AI-Powered Media Recommendations & Lead Generation</p>
 </div>
 """, unsafe_allow_html=True)
