@@ -180,7 +180,7 @@ st.markdown("""
     
     /* Sidebar headers */
     .sidebar-header {
-        font-size: 1rem;
+        font-size: 0.85rem;
         font-weight: 600;
         color: var(--primary);
         margin-bottom: 0.5rem;
@@ -250,35 +250,9 @@ st.markdown("""
         }
     }
     
-    /* Metric row responsive */
-    @media (max-width: 640px) {
-        .row-widget.stHorizontal {
-            flex-wrap: wrap;
-        }
-    }
-    
-    /* Dataframe styling */
-    .dataframe {
-        font-size: 0.8rem;
-    }
-    
     /* Hide default streamlit branding */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    
-    /* Custom scrollbar */
-    ::-webkit-scrollbar {
-        width: 6px;
-        height: 6px;
-    }
-    ::-webkit-scrollbar-track {
-        background: var(--bg-gray);
-        border-radius: 10px;
-    }
-    ::-webkit-scrollbar-thumb {
-        background: var(--primary-light);
-        border-radius: 10px;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -453,7 +427,6 @@ total_spend = filtered_df['spend_kes'].sum()
 total_revenue = filtered_df['revenue_kes'].sum()
 avg_roas = total_revenue / total_spend if total_spend > 0 else 0
 total_campaigns_active = len(filtered_df['campaign'].unique())
-avg_ctr = np.random.uniform(1.5, 3.5)  # Mock CTR for demonstration
 
 col1, col2, col3, col4 = st.columns(4)
 
@@ -597,8 +570,9 @@ with tab1:
         st.markdown('<p class="section-title">Weekly ROAS Trend</p>', unsafe_allow_html=True)
         
         if not filtered_df.empty:
-            filtered_df['week'] = pd.to_datetime(filtered_df['date']).dt.isocalendar().week
-            weekly = filtered_df.groupby('week').agg({
+            filtered_df_copy = filtered_df.copy()
+            filtered_df_copy['week'] = pd.to_datetime(filtered_df_copy['date']).dt.isocalendar().week
+            weekly = filtered_df_copy.groupby('week').agg({
                 'spend_kes': 'sum',
                 'revenue_kes': 'sum'
             }).reset_index()
@@ -621,43 +595,50 @@ with tab1:
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.markdown('<p class="section-title">💡 Intelligence Insights</p>', unsafe_allow_html=True)
     
-    if not filtered_df.empty and not campaign_roas.empty:
-        col1, col2, col3 = st.columns(3)
+    if not filtered_df.empty:
+        campaign_roas = filtered_df.groupby('campaign')['roas'].mean().reset_index()
+        platform_roas = filtered_df.groupby('platform')['roas'].mean().reset_index()
         
-        best_campaign = campaign_roas.loc[campaign_roas['roas'].idxmax()]
-        worst_campaign = campaign_roas.loc[campaign_roas['roas'].idxmin()]
-        
-        with col1:
-            st.markdown(f"""
-            <div class="rec-card">
-                <h4>🚀 Top Performer</h4>
-                <p><strong>{best_campaign['campaign'][:25]}</strong></p>
-                <p>ROAS: {best_campaign['roas']:.2f}x</p>
-                <p style="font-size:0.75rem; margin-top:0.5rem;">→ Increase budget allocation</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col2:
-            st.markdown(f"""
-            <div class="rec-card">
-                <h4>⚠️ Needs Attention</h4>
-                <p><strong>{worst_campaign['campaign'][:25]}</strong></p>
-                <p>ROAS: {worst_campaign['roas']:.2f}x</p>
-                <p style="font-size:0.75rem; margin-top:0.5rem;">→ Review targeting & creative</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col3:
-            st.markdown(f"""
-            <div class="rec-card">
-                <h4>📱 Platform Insight</h4>
-                <p><strong>{platform_roas.loc[platform_roas['roas'].idxmax(), 'platform']}</strong></p>
-                <p>Best performing platform</p>
-                <p style="font-size:0.75rem; margin-top:0.5rem;">→ Consider budget reallocation</p>
-            </div>
-            """, unsafe_allow_html=True)
+        if not campaign_roas.empty and not platform_roas.empty:
+            col1, col2, col3 = st.columns(3)
+            
+            best_campaign = campaign_roas.loc[campaign_roas['roas'].idxmax()]
+            worst_campaign = campaign_roas.loc[campaign_roas['roas'].idxmin()]
+            best_platform = platform_roas.loc[platform_roas['roas'].idxmax()]
+            
+            with col1:
+                st.markdown(f"""
+                <div class="rec-card">
+                    <h4>🚀 Top Performer</h4>
+                    <p><strong>{best_campaign['campaign'][:25]}</strong></p>
+                    <p>ROAS: {best_campaign['roas']:.2f}x</p>
+                    <p style="font-size:0.75rem; margin-top:0.5rem;">→ Increase budget allocation</p>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col2:
+                st.markdown(f"""
+                <div class="rec-card">
+                    <h4>⚠️ Needs Attention</h4>
+                    <p><strong>{worst_campaign['campaign'][:25]}</strong></p>
+                    <p>ROAS: {worst_campaign['roas']:.2f}x</p>
+                    <p style="font-size:0.75rem; margin-top:0.5rem;">→ Review targeting & creative</p>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col3:
+                st.markdown(f"""
+                <div class="rec-card">
+                    <h4>📱 Platform Insight</h4>
+                    <p><strong>{best_platform['platform']}</strong></p>
+                    <p>Best performing platform</p>
+                    <p style="font-size:0.75rem; margin-top:0.5rem;">→ Consider budget reallocation</p>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.info("Run campaigns to see intelligence insights.")
     else:
-        st.info("Run campaigns to see intelligence insights.")
+        st.info("No data available. Adjust your filters.")
     
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -848,4 +829,26 @@ with tab4:
     st.markdown('<p class="section-title">Platform Performance Summary</p>', unsafe_allow_html=True)
     
     if not filtered_df.empty:
-        platform
+        platform_stats = filtered_df.groupby('platform').agg({
+            'spend_kes': ['sum', 'mean'],
+            'revenue_kes': ['sum', 'mean'],
+            'roas': ['mean', 'min', 'max']
+        }).round(2)
+        
+        # Rename columns for better display
+        platform_stats.columns = ['Total Spend', 'Avg Spend', 'Total Revenue', 'Avg Revenue', 'Avg ROAS', 'Min ROAS', 'Max ROAS']
+        st.dataframe(platform_stats, use_container_width=True)
+    else:
+        st.info("No data available for the selected filters.")
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ============================================================================
+# FOOTER
+# ============================================================================
+st.markdown("""
+<div class="footer">
+    <p>Ad Intelligence Kenya | Data-driven advertising analytics</p>
+    <p style="font-size: 0.7rem;">© 2024 All Rights Reserved</p>
+</div>
+""", unsafe_allow_html=True)
