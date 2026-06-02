@@ -1052,7 +1052,7 @@ def show_client_portal():
             st.info("No campaign data available")
     
     # ========================================================================
-    # TAB 2: Smart Recommendations
+    # TAB 2: Smart Recommendations (FIXED BOOKING FORM)
     # ========================================================================
     with tab2:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
@@ -1060,6 +1060,12 @@ def show_client_portal():
         
         engine = MediaRecommendationEngine()
         station_db = StationDatabase()
+        
+        # Create session state for recommendations if not exists
+        if 'generated_recommendations' not in st.session_state:
+            st.session_state.generated_recommendations = None
+        if 'campaign_params' not in st.session_state:
+            st.session_state.campaign_params = {}
         
         col1, col2 = st.columns(2)
         
@@ -1085,8 +1091,7 @@ def show_client_portal():
                 selected_area=selected_area
             )
             
-            estimated_roas = 2.5
-            st.session_state.recommendations = recommendations
+            st.session_state.generated_recommendations = recommendations
             st.session_state.campaign_params = {
                 'goal': campaign_goal,
                 'budget': budget,
@@ -1094,6 +1099,14 @@ def show_client_portal():
                 'audience': target_audience,
                 'region': region_type
             }
+            st.rerun()
+        
+        # Display recommendations if they exist
+        if st.session_state.generated_recommendations:
+            recommendations = st.session_state.generated_recommendations
+            params = st.session_state.campaign_params
+            
+            estimated_roas = 2.5
             
             st.markdown("---")
             st.markdown(f"""
@@ -1115,43 +1128,58 @@ def show_client_portal():
                 </div>
                 """, unsafe_allow_html=True)
             
-            # Multi-station booking form
+            # BOOKING FORM - Separated and always visible
             st.markdown("---")
             st.markdown("### 📞 Book Your Campaign")
             
+            # Station selection checkboxes (outside form to prevent disappearing)
             station_options = [f"{r['station_name']} ({r['media_type']})" for r in recommendations[:5]]
-            selected_stations = st.multiselect("Select Stations to Book", station_options)
+            st.markdown("**Select stations to book:**")
             
-            with st.form("booking_form"):
-                st.markdown("#### Contact Information")
-                col1, col2 = st.columns(2)
-                with col1:
-                    contact_name = st.text_input("Your Name*")
-                    contact_email = st.text_input("Email Address*")
-                with col2:
-                    contact_phone = st.text_input("Phone Number*")
-                    preferred_launch = st.date_input("Preferred Launch Date", min_value=datetime.now().date())
+            selected_stations = []
+            for station in station_options:
+                if st.checkbox(station, key=f"station_check_{station}"):
+                    selected_stations.append(station)
+            
+            # Only show the form if at least one station is selected
+            if selected_stations:
+                st.markdown("---")
+                st.markdown("#### Complete Your Booking")
                 
-                additional_notes = st.text_area("Campaign Details / Special Requirements")
-                
-                if st.form_submit_button("📞 Submit Booking Request", use_container_width=True):
-                    if contact_name and contact_email and contact_phone and selected_stations:
-                        booking_id = create_booking_request(
-                            company_id, selected_stations, campaign_goal,
-                            budget, duration, target_audience, region_type,
-                            contact_name, contact_email, contact_phone,
-                            additional_notes
-                        )
-                        if booking_id:
-                            st.success(f"✅ Booking request submitted! Reference: #{booking_id}")
-                            st.balloons()
-                            st.rerun()
+                with st.form(key="booking_submission_form"):
+                    st.markdown("##### Contact Information")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        contact_name = st.text_input("Your Name*", key="booking_name")
+                        contact_email = st.text_input("Email Address*", key="booking_email")
+                    with col2:
+                        contact_phone = st.text_input("Phone Number*", key="booking_phone")
+                        preferred_launch = st.date_input("Preferred Launch Date", min_value=datetime.now().date(), key="booking_date")
+                    
+                    additional_notes = st.text_area("Campaign Details / Special Requirements", key="booking_notes")
+                    
+                    submit_button = st.form_submit_button("📞 Submit Booking Request", use_container_width=True)
+                    
+                    if submit_button:
+                        if contact_name and contact_email and contact_phone:
+                            booking_id = create_booking_request(
+                                company_id, selected_stations, params['goal'],
+                                params['budget'], params['duration'], params['audience'], params['region'],
+                                contact_name, contact_email, contact_phone,
+                                additional_notes
+                            )
+                            if booking_id:
+                                st.success(f"✅ Booking request submitted! Reference: #{booking_id}")
+                                st.balloons()
+                                # Clear recommendations after successful booking
+                                st.session_state.generated_recommendations = None
+                                st.rerun()
+                            else:
+                                st.error("Error submitting request. Please try again.")
                         else:
-                            st.error("Error submitting request. Please try again.")
-                    elif not selected_stations:
-                        st.warning("Please select at least one station to book")
-                    else:
-                        st.error("Please fill in all contact fields")
+                            st.error("Please fill in all contact fields")
+            else:
+                st.info("👆 Select at least one station above to continue with booking")
         
         st.markdown('</div>', unsafe_allow_html=True)
     
@@ -1181,7 +1209,7 @@ def show_client_portal():
         st.markdown('</div>', unsafe_allow_html=True)
     
     # ========================================================================
-    # TAB 4: My Bookings (Client can manage status)
+    # TAB 4: My Bookings
     # ========================================================================
     with tab4:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
@@ -1216,7 +1244,7 @@ def show_client_portal():
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # Status update buttons - Client can update their own booking status
+                # Status update buttons
                 st.markdown("**Update Status:**")
                 col1, col2, col3 = st.columns(3)
                 
@@ -1316,7 +1344,7 @@ def show_client_portal():
 # ============================================================================
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
-    st.session_state.recommendations = []
+    st.session_state.generated_recommendations = None
     st.session_state.campaign_params = {}
 
 if st.session_state.logged_in:
@@ -1329,7 +1357,7 @@ if st.session_state.logged_in:
         st.markdown("---")
         if st.button("🚪 Logout", use_container_width=True):
             st.session_state.logged_in = False
-            st.session_state.recommendations = []
+            st.session_state.generated_recommendations = None
             st.session_state.campaign_params = {}
             st.rerun()
 else:
