@@ -2,11 +2,19 @@
 Ad Intelligence Kenya - Main Application Entry Point
 """
 import streamlit as st
-from auth.auth import init_session, login, logout
+from auth.auth import init_session, login
 from assets.styles import apply_styles
 from database.db import init_database
 import pages.admin as admin
 import pages.client as client
+
+# Page configuration - MUST BE FIRST
+st.set_page_config(
+    page_title="Ad Intelligence Kenya",
+    page_icon="🎯",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
 # Initialize database
 init_database()
