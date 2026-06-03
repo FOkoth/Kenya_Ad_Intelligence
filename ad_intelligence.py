@@ -1,6 +1,6 @@
 """
 Ad Intelligence Kenya - Complete Platform
-Phase 1 Features: Email Notifications, Downloadable Charts, Lead Scoring, Station Contacts, Loading Animations
+Phase 1 Features: Email Notifications, Lead Scoring, Station Contacts, Loading Animations
 """
 import streamlit as st
 import pandas as pd
@@ -12,71 +12,6 @@ from datetime import datetime, timedelta
 import random
 import uuid
 import time
-import base64
-import smtplib
-import ssl
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-
-# ============================================================================
-# EMAIL CONFIGURATION
-# ============================================================================
-SMTP_CONFIG = {
-    'enabled': False,
-    'smtp_server': 'smtp.gmail.com',
-    'smtp_port': 587,
-    'sender_email': 'your-email@gmail.com',
-    'sender_password': 'your-app-password'
-}
-
-def send_email_notification(recipient_email, subject, body):
-    if not SMTP_CONFIG['enabled'] or not recipient_email:
-        return False
-    try:
-        msg = MIMEMultipart()
-        msg['From'] = SMTP_CONFIG['sender_email']
-        msg['To'] = recipient_email
-        msg['Subject'] = subject
-        msg.attach(MIMEText(body, 'html'))
-        context = ssl.create_default_context()
-        with smtplib.SMTP(SMTP_CONFIG['smtp_server'], SMTP_CONFIG['smtp_port']) as server:
-            server.starttls(context=context)
-            server.login(SMTP_CONFIG['sender_email'], SMTP_CONFIG['sender_password'])
-            server.send_message(msg)
-        return True
-    except Exception as e:
-        print(f"Email error: {e}")
-        return False
-
-# ============================================================================
-# HELPER FUNCTIONS
-# ============================================================================
-def get_image_download_link(fig, filename="chart.png"):
-    img_bytes = fig.to_image(format="png", width=800, height=500, scale=2)
-    b64 = base64.b64encode(img_bytes).decode()
-    return f'<a href="data:image/png;base64,{b64}" download="{filename}">📥 Download as PNG</a>'
-
-def calculate_lead_score(message, status):
-    score = 0
-    msg_lower = message.lower() if message else ''
-    if 'interested' in msg_lower or 'buy' in msg_lower or 'purchase' in msg_lower:
-        score += 30
-    if 'price' in msg_lower or 'cost' in msg_lower or 'how much' in msg_lower:
-        score += 20
-    if 'when' in msg_lower or 'available' in msg_lower:
-        score += 15
-    if len(msg_lower) > 50:
-        score += 10
-    if status == 'converted':
-        score += 50
-    elif status == 'contacted':
-        score += 20
-    if score >= 60:
-        return "hot"
-    elif score >= 30:
-        return "warm"
-    else:
-        return "cold"
 
 # ============================================================================
 # DATABASE FUNCTIONS
@@ -199,27 +134,56 @@ def init_database():
             ('Inooro FM', 'Radio', 'Central', 'Jane Wambui', '+254729012345', 'inooro@royalmedia.co.ke', 'P.O. Box 12354, Nyeri', 'www.inoorofm.co.ke'),
         ]
         for s in stations_data:
-            cursor.execute('INSERT OR IGNORE INTO stations VALUES (?,?,?,?,?,?,?,?,?)', (None, s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7]))
+            cursor.execute('INSERT OR IGNORE INTO stations (station_name, media_type, region, contact_person, contact_phone, contact_email, address, website) VALUES (?,?,?,?,?,?,?,?)', s)
     
     # Create default users
     cursor.execute("SELECT COUNT(*) FROM users")
     if cursor.fetchone()[0] == 0:
-        cursor.execute("INSERT INTO users VALUES (?,?,?,?,?,?)", (None, 'admin', 'admin123', 'admin', None, datetime.now().isoformat()))
+        cursor.execute("INSERT INTO users (username, password, role, company_id, created_date) VALUES (?,?,?,?,?)", 
+                      ('admin', 'admin123', 'admin', None, datetime.now().isoformat()))
         companies = [('Safaricom', 'Telecommunications', 'advertising@safaricom.com', '+254700000000')]
         for c in companies:
-            cursor.execute("INSERT INTO companies VALUES (?,?,?,?,?,?,?)", (None, c[0], c[1], c[2], c[3], datetime.now().isoformat(), 'active'))
+            cursor.execute("INSERT INTO companies (company_name, industry, email, phone, created_date, status) VALUES (?,?,?,?,?,?)", 
+                          (c[0], c[1], c[2], c[3], datetime.now().isoformat(), 'active'))
             company_id = cursor.lastrowid
-            cursor.execute("INSERT INTO users VALUES (?,?,?,?,?,?)", (None, 'safaricom', 'client123', 'client', company_id, datetime.now().isoformat()))
+            cursor.execute("INSERT INTO users (username, password, role, company_id, created_date) VALUES (?,?,?,?,?)", 
+                          ('safaricom', 'client123', 'client', company_id, datetime.now().isoformat()))
             for day in range(30):
                 date = (datetime.now() - timedelta(days=day)).strftime('%Y-%m-%d')
                 spend = random.uniform(5000, 50000)
                 revenue = spend * random.uniform(0.5, 4.0)
-                cursor.execute("INSERT INTO campaigns VALUES (?,?,?,?,?,?,?,?)", (None, company_id, f"Safaricom Campaign", random.choice(['Meta', 'Google']), spend, revenue, revenue/spend, date))
+                cursor.execute("INSERT INTO campaigns (company_id, campaign_name, platform, spend_kes, revenue_kes, roas, date) VALUES (?,?,?,?,?,?,?)", 
+                              (company_id, "Safaricom Campaign", random.choice(['Meta', 'Google']), spend, revenue, revenue/spend, date))
     
     conn.commit()
     conn.close()
 
 init_database()
+
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+def calculate_lead_score(message, status):
+    score = 0
+    msg_lower = message.lower() if message else ''
+    if 'interested' in msg_lower or 'buy' in msg_lower or 'purchase' in msg_lower:
+        score += 30
+    if 'price' in msg_lower or 'cost' in msg_lower or 'how much' in msg_lower:
+        score += 20
+    if 'when' in msg_lower or 'available' in msg_lower:
+        score += 15
+    if len(msg_lower) > 50:
+        score += 10
+    if status == 'converted':
+        score += 50
+    elif status == 'contacted':
+        score += 20
+    if score >= 60:
+        return "hot"
+    elif score >= 30:
+        return "warm"
+    else:
+        return "cold"
 
 # ============================================================================
 # DATABASE HELPER FUNCTIONS
@@ -470,18 +434,22 @@ def show_login():
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
         if st.button("Login", use_container_width=True):
-            user = check_login(username, password)
-            if user:
-                st.session_state.logged_in = True
-                st.session_state.user_id = user[0]
-                st.session_state.username = user[1]
-                st.session_state.role = user[2]
-                st.session_state.company_id = user[3]
-                st.rerun()
-            else:
-                st.error("Invalid username or password")
+            with st.spinner("Logging in..."):
+                time.sleep(0.5)
+                user = check_login(username, password)
+                if user:
+                    st.session_state.logged_in = True
+                    st.session_state.user_id = user[0]
+                    st.session_state.username = user[1]
+                    st.session_state.role = user[2]
+                    st.session_state.company_id = user[3]
+                    st.rerun()
+                else:
+                    st.error("Invalid username or password")
         st.markdown("---")
-        st.caption("Demo: admin/admin123 | safaricom/client123")
+        st.caption("Demo Accounts:")
+        st.caption("Admin: admin / admin123")
+        st.caption("Client: safaricom / client123")
 
 # ============================================================================
 # ADMIN DASHBOARD
@@ -531,12 +499,15 @@ def show_admin_dashboard():
                     notes = st.text_area("Admin Notes", key=f"notes_{b['booking_id']}")
                 with col2:
                     if st.button(f"✅ Approve", key=f"approve_{b['booking_id']}"):
-                        update_booking_status(b['booking_id'], 'approved', notes)
-                        st.success(f"Booking #{b['booking_id']} approved!")
-                        st.rerun()
+                        with st.spinner("Processing..."):
+                            update_booking_status(b['booking_id'], 'approved', notes)
+                            st.success(f"Booking #{b['booking_id']} approved!")
+                            time.sleep(1)
+                            st.rerun()
                     if st.button(f"❌ Suspend", key=f"suspend_{b['booking_id']}"):
-                        update_booking_status(b['booking_id'], 'suspended', notes)
-                        st.rerun()
+                        with st.spinner("Processing..."):
+                            update_booking_status(b['booking_id'], 'suspended', notes)
+                            st.rerun()
                 st.markdown("---")
         else:
             st.info("No pending approvals")
@@ -544,7 +515,7 @@ def show_admin_dashboard():
     
     with tab2:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("#### All Leads")
+        st.markdown("#### All Leads with Scoring")
         if not all_leads.empty:
             lead_stats = get_lead_statistics()
             col1, col2, col3 = st.columns(3)
@@ -566,7 +537,7 @@ def show_admin_dashboard():
                 </div>
                 """, unsafe_allow_html=True)
                 if lead['status'] == 'new':
-                    if st.button(f"Mark Contacted", key=f"contact_{lead['lead_id']}"):
+                    if st.button(f"📞 Mark Contacted", key=f"contact_{lead['lead_id']}"):
                         update_lead_status(lead['lead_id'], 'contacted')
                         st.rerun()
                 st.markdown("---")
@@ -576,7 +547,7 @@ def show_admin_dashboard():
     
     with tab3:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("#### Media Directory with Contacts")
+        st.markdown("#### Media Directory with Contact Details")
         station_db = StationDatabase()
         for station in station_db.get_all_stations_with_contacts():
             with st.expander(f"{station['name']} ({station['media_type']})"):
@@ -584,15 +555,16 @@ def show_admin_dashboard():
                 st.write(f"**Reach:** {station['reach']:,}")
                 st.write(f"**Price Tier:** {station['price_tier']}")
                 if station['contacts']:
-                    st.write("**Contact:**")
+                    st.markdown("**Contact Information:**")
                     st.write(f"👤 {station['contacts']['contact_person']}")
                     st.write(f"📞 {station['contacts']['contact_phone']}")
                     st.write(f"📧 {station['contacts']['contact_email']}")
+                    st.write(f"📍 {station['contacts']['address']}")
         st.markdown('</div>', unsafe_allow_html=True)
     
     with tab4:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("#### Companies")
+        st.markdown("#### Registered Companies")
         if not all_companies.empty:
             st.dataframe(all_companies, use_container_width=True, hide_index=True)
         st.markdown('</div>', unsafe_allow_html=True)
@@ -610,7 +582,7 @@ def show_client_portal():
     company_email = result[1] if result else ""
     conn.close()
     
-    st.markdown(f'<div class="main-header"><h1>Welcome, {company_name}</h1><p>Your personalized dashboard</p></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="main-header"><h1>Welcome, {company_name}</h1><p>Your personalized advertising dashboard</p></div>', unsafe_allow_html=True)
     
     lead_stats = get_lead_statistics(company_id)
     booking_stats = get_booking_statistics(company_id)
@@ -648,9 +620,9 @@ def show_client_portal():
             target_audience = st.selectbox("Target Audience", ["Mass Market", "Youth", "Professionals"])
             region_type = st.selectbox("Region Type", ["National", "Local", "Both"])
         
-        if st.button("Generate Recommendations", use_container_width=True):
-            with st.spinner("Analyzing stations..."):
-                time.sleep(1)
+        if st.button("🔍 Generate Recommendations", use_container_width=True):
+            with st.spinner("Analyzing stations and generating recommendations..."):
+                time.sleep(1.5)
                 recs = engine.recommend_stations(campaign_goal, budget, duration, target_audience, region_type)
                 st.session_state.recs = recs
                 st.session_state.rec_params = {'goal': campaign_goal, 'budget': budget, 'duration': duration, 'audience': target_audience, 'region': region_type}
@@ -658,26 +630,31 @@ def show_client_portal():
         
         if st.session_state.get('recs'):
             st.markdown("---")
-            st.markdown("### Recommended Stations")
+            st.markdown("### 🏆 Recommended Stations")
             for i, r in enumerate(st.session_state.recs[:3]):
+                price_icon = "🟢" if r['price_tier'] == "Economy" else "🟡" if r['price_tier'] == "Standard" else "🔴"
                 st.markdown(f"""
                 <div class="rec-card">
-                    <h4>#{i+1} {r['station_name']} ({r['media_type']})</h4>
-                    <p>Reach: {r['reach']:,} | Cost/spot: KES {r['cost_per_spot']:,}</p>
-                    <p>Recommended spots: {r['recommended_spots']}/day</p>
+                    <h4>#{i+1} {r['station_name']} ({r['media_type']}) {price_icon}</h4>
+                    <p>📊 Reach: {r['reach']:,} | 💰 Cost/spot: KES {r['cost_per_spot']:,}</p>
+                    <p>📺 Recommended spots: {r['recommended_spots']} per day</p>
                 </div>
                 """, unsafe_allow_html=True)
             
             st.markdown("---")
-            st.markdown("### Book Your Campaign")
+            st.markdown("### 📞 Book Your Campaign")
             station_options = [f"{r['station_name']} ({r['media_type']})" for r in st.session_state.recs[:5]]
+            st.markdown("**Select stations to book:**")
+            
             selected = []
             for opt in station_options:
-                if st.checkbox(opt):
+                if st.checkbox(opt, key=f"station_{opt}"):
                     selected.append(opt)
             
             if selected:
-                with st.form("booking_form"):
+                st.markdown("---")
+                with st.form(key="booking_form"):
+                    st.markdown("##### Contact Information")
                     col1, col2 = st.columns(2)
                     with col1:
                         name = st.text_input("Your Name*", value=company_name)
@@ -685,17 +662,22 @@ def show_client_portal():
                     with col2:
                         phone = st.text_input("Phone*")
                         launch = st.date_input("Preferred Launch Date", min_value=datetime.now().date())
-                    notes = st.text_area("Notes")
+                    notes = st.text_area("Campaign Details / Requirements")
                     
-                    if st.form_submit_button("Submit Booking"):
+                    if st.form_submit_button("📞 Submit Booking Request", use_container_width=True):
                         if name and email and phone:
-                            bid = create_booking_request(company_id, selected, campaign_goal, budget, duration, target_audience, region_type, name, email, phone, notes)
-                            if bid:
-                                st.success(f"Booking #{bid} submitted! Pending admin approval.")
-                                st.session_state.recs = None
-                                st.rerun()
+                            with st.spinner("Submitting your booking..."):
+                                bid = create_booking_request(company_id, selected, campaign_goal, budget, duration, target_audience, region_type, name, email, phone, notes)
+                                if bid:
+                                    st.success(f"✅ Booking #{bid} submitted! Pending admin approval.")
+                                    st.balloons()
+                                    st.session_state.recs = None
+                                    time.sleep(2)
+                                    st.rerun()
                         else:
-                            st.error("Please fill all fields")
+                            st.error("Please fill in all contact fields")
+            else:
+                st.info("👆 Select at least one station above to continue")
         
         st.markdown('</div>', unsafe_allow_html=True)
     
@@ -705,26 +687,64 @@ def show_client_portal():
         st.markdown("#### My Bookings")
         bookings = get_booking_requests(company_id)
         if not bookings.empty:
+            # Booking statistics
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total", booking_stats['total'])
+            with col2:
+                st.metric("Pending", booking_stats['pending_approval'])
+            with col3:
+                st.metric("Approved", booking_stats['approved'])
+            with col4:
+                st.metric("Confirmed", booking_stats['confirmed'])
+            st.markdown("---")
+            
             for _, b in bookings.iterrows():
-                status_badge = 'badge-pending' if b['status'] == 'pending_approval' else 'badge-approved' if b['status'] == 'approved' else 'badge-confirmed'
-                status_text = b['status'].replace('_', ' ').upper()
+                if b['status'] == 'pending_approval':
+                    border = "booking-card"
+                    badge = "badge-pending"
+                    text = "PENDING APPROVAL"
+                elif b['status'] == 'approved':
+                    border = "booking-card"
+                    badge = "badge-approved"
+                    text = "APPROVED - READY TO CONFIRM"
+                elif b['status'] == 'confirmed':
+                    border = "booking-card"
+                    badge = "badge-confirmed"
+                    text = "CONFIRMED"
+                else:
+                    border = "booking-card"
+                    badge = "badge-pending"
+                    text = b['status'].upper()
+                
                 st.markdown(f"""
-                <div class="booking-card">
-                    <p><strong>Booking #{b['booking_id']}</strong> - {b['request_date'][:10]}</p>
+                <div class="{border}">
+                    <p><strong>Booking #{b['booking_id']}</strong> - {b['request_date'][:10] if b['request_date'] else 'N/A'}</p>
                     <p><strong>Stations:</strong> {b.get('selected_stations', b['station_name'])}</p>
                     <p><strong>Budget:</strong> KES {b['budget_kes']:,.0f} | <strong>Duration:</strong> {b['duration_days']} days</p>
-                    <p><strong>Status:</strong> <span class="{status_badge}">{status_text}</span></p>
+                    <p><strong>Status:</strong> <span class="{badge}">{text}</span></p>
                 </div>
                 """, unsafe_allow_html=True)
                 
                 if b['status'] == 'approved':
-                    if st.button(f"✅ Confirm Booking", key=f"confirm_{b['booking_id']}"):
-                        update_booking_status(b['booking_id'], 'confirmed')
-                        st.success("Booking confirmed!")
-                        st.rerun()
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button(f"✅ Confirm Booking", key=f"confirm_{b['booking_id']}"):
+                            with st.spinner("Confirming..."):
+                                update_booking_status(b['booking_id'], 'confirmed')
+                                st.success("Booking confirmed!")
+                                time.sleep(1)
+                                st.rerun()
+                    with col2:
+                        if st.button(f"⏸️ Suspend", key=f"suspend_client_{b['booking_id']}"):
+                            update_booking_status(b['booking_id'], 'suspended')
+                            st.rerun()
+                elif b['status'] == 'pending_approval':
+                    st.info("⏳ Waiting for admin approval...")
+                
                 st.markdown("---")
         else:
-            st.info("No bookings yet")
+            st.info("No bookings yet. Generate recommendations and submit a booking.")
         st.markdown('</div>', unsafe_allow_html=True)
     
     # Tab 3: My Leads
@@ -732,36 +752,44 @@ def show_client_portal():
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
         st.markdown("#### My Leads")
         
-        with st.expander("Demo: Submit Test Lead"):
-            test_name = st.text_input("Name", "John Kamau")
-            test_email = st.text_input("Email", "john@example.com")
-            test_phone = st.text_input("Phone", "+254712345678")
-            test_product = st.text_input("Product Interest", "Your Service")
-            test_msg = st.text_area("Message", "I'm very interested! Please call me.")
-            if st.button("Submit Test Lead"):
-                add_audience_lead(company_id, test_name, test_email, test_phone, test_product, test_msg, "Website")
-                st.success("Lead added!")
-                st.rerun()
+        with st.expander("📝 Demo: Submit a Test Lead", expanded=False):
+            test_name = st.text_input("Name", "John Kamau", key="test_name")
+            test_email = st.text_input("Email", "john@example.com", key="test_email")
+            test_phone = st.text_input("Phone", "+254712345678", key="test_phone")
+            test_product = st.text_input("Product Interest", "Your Service", key="test_product")
+            test_msg = st.text_area("Message", "I'm very interested! Please call me.", key="test_msg")
+            if st.button("Submit Test Lead", key="submit_test"):
+                with st.spinner("Adding lead..."):
+                    add_audience_lead(company_id, test_name, test_email, test_phone, test_product, test_msg, "Website")
+                    st.success("Test lead added!")
+                    time.sleep(1)
+                    st.rerun()
         
         leads = get_audience_leads(company_id)
         if not leads.empty:
+            st.markdown(f"#### Your Leads ({len(leads[leads['status'] == 'new'])} new)")
             for _, lead in leads.iterrows():
                 score_badge = '<span class="lead-hot">🔥 HOT</span>' if lead['lead_score'] == 'hot' else '<span class="lead-warm">🟡 WARM</span>' if lead['lead_score'] == 'warm' else '<span class="lead-cold">❄️ COLD</span>'
                 st.markdown(f"""
                 <div class="booking-card">
-                    <p><strong>{lead['lead_name']}</strong> {score_badge} - {lead['created_date'][:10]}</p>
+                    <p><strong>{lead['lead_name']}</strong> {score_badge} - {lead['created_date'][:10] if lead['created_date'] else 'N/A'}</p>
                     <p><strong>Phone:</strong> {lead['lead_phone']} | <strong>Email:</strong> {lead['lead_email']}</p>
                     <p><strong>Interest:</strong> {lead['interest_product']}</p>
                     <p><strong>Message:</strong> {lead['message'][:150] if lead['message'] else 'No message'}</p>
                 </div>
                 """, unsafe_allow_html=True)
                 if lead['status'] == 'new':
-                    if st.button(f"Mark Contacted", key=f"contact_lead_{lead['lead_id']}"):
+                    if st.button(f"📞 Mark Contacted", key=f"contact_lead_{lead['lead_id']}"):
                         update_lead_status(lead['lead_id'], 'contacted')
                         st.rerun()
                 st.markdown("---")
+            
+            # Lead statistics
+            st.markdown("#### Lead Score Summary")
+            status_counts = leads.groupby('lead_score').size().reset_index(name='count')
+            st.dataframe(status_counts, use_container_width=True, hide_index=True)
         else:
-            st.info("No leads yet")
+            st.info("No leads yet. Use the demo form above to test lead capture.")
         st.markdown('</div>', unsafe_allow_html=True)
     
     # Tab 4: Media Directory
@@ -769,14 +797,17 @@ def show_client_portal():
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
         st.markdown("#### Media Directory")
         station_db = StationDatabase()
+        region_filter = st.selectbox("Filter by Region", ["All", "National", "Coast", "Western", "Central"])
+        
         for station in station_db.get_all_stations_with_contacts():
-            with st.expander(f"{station['name']} ({station['media_type']})"):
-                st.write(f"**Region:** {station['region']}")
-                st.write(f"**Reach:** {station['reach']:,}")
-                if station['contacts']:
-                    st.write("**Contact:**")
-                    st.write(f"📞 {station['contacts']['contact_phone']}")
-                    st.write(f"📧 {station['contacts']['contact_email']}")
+            if region_filter == "All" or station['region'] == region_filter:
+                with st.expander(f"{station['name']} ({station['media_type']})"):
+                    st.write(f"**Region:** {station['region']}")
+                    st.write(f"**Reach:** {station['reach']:,}")
+                    if station['contacts']:
+                        st.markdown("**Contact Information:**")
+                        st.write(f"📞 {station['contacts']['contact_phone']}")
+                        st.write(f"📧 {station['contacts']['contact_email']}")
         st.markdown('</div>', unsafe_allow_html=True)
     
     # Tab 5: Performance
@@ -798,12 +829,11 @@ def show_client_portal():
             
             campaign_roas = df.groupby('campaign_name')['roas'].mean().reset_index()
             fig = px.bar(campaign_roas, x='roas', y='campaign_name', orientation='h', color='roas', color_continuous_scale='RdYlGn')
-            fig.add_vline(x=2.0, line_dash="dash", line_color="#EF4444")
+            fig.add_vline(x=2.0, line_dash="dash", line_color="#EF4444", annotation_text="Target (2x)")
             fig.update_layout(height=350, plot_bgcolor='white', showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
-            st.markdown(get_image_download_link(fig, "roas_chart.png"), unsafe_allow_html=True)
         else:
-            st.info("No campaign data")
+            st.info("No campaign data available")
 
 # ============================================================================
 # MAIN
@@ -819,6 +849,7 @@ if st.session_state.logged_in:
     else:
         show_client_portal()
     with st.sidebar:
+        st.markdown("---")
         if st.button("🚪 Logout", use_container_width=True):
             st.session_state.logged_in = False
             st.session_state.recs = None
@@ -826,4 +857,4 @@ if st.session_state.logged_in:
 else:
     show_login()
 
-st.markdown('<div class="footer"><p>Ad Intelligence Kenya | AI-Powered Advertising Platform</p></div>', unsafe_allow_html=True)
+st.markdown('<div class="footer"><p>Ad Intelligence Kenya | AI-Powered Media Recommendations & Lead Management</p></div>', unsafe_allow_html=True)
