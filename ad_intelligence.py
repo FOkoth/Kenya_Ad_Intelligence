@@ -1,6 +1,6 @@
 """
 Ad Intelligence Kenya - Complete Platform
-Clean, Professional, Responsive Design
+Professional Design with Time Filters & Better Layout
 """
 import streamlit as st
 import pandas as pd
@@ -11,6 +11,7 @@ import sqlite3
 from datetime import datetime, timedelta
 import random
 import uuid
+import calendar
 
 # ============================================================================
 # PAGE CONFIGURATION - MUST BE FIRST
@@ -156,12 +157,24 @@ def init_database():
             company_id = cursor.lastrowid
             cursor.execute("INSERT INTO users (username, password, role, company_id, created_date) VALUES (?,?,?,?,?)", 
                           ('safaricom', 'client123', 'client', company_id, datetime.now().isoformat()))
-            for day in range(30):
+            for day in range(90):
                 date = (datetime.now() - timedelta(days=day)).strftime('%Y-%m-%d')
                 spend = random.uniform(5000, 50000)
                 revenue = spend * random.uniform(0.5, 4.0)
                 cursor.execute("INSERT INTO campaigns (company_id, campaign_name, platform, spend_kes, revenue_kes, roas, date) VALUES (?,?,?,?,?,?,?)", 
                               (company_id, "Safaricom Campaign", random.choice(['Meta', 'Google']), spend, revenue, revenue/spend, date))
+            
+            # Sample bookings for testing
+            sample_bookings = [
+                ('pending_approval', (datetime.now() - timedelta(days=5)).isoformat()),
+                ('approved', (datetime.now() - timedelta(days=10)).isoformat()),
+                ('confirmed', (datetime.now() - timedelta(days=15)).isoformat()),
+            ]
+            for status, date in sample_bookings:
+                cursor.execute('''INSERT INTO booking_requests 
+                    (company_id, station_name, selected_stations, media_type, preferred_time, budget_kes, duration_days, target_audience, campaign_goal, contact_name, contact_email, contact_phone, status, request_date)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                    (company_id, 'Citizen TV', 'Citizen TV, Radio Jambo', 'Mixed', '2024-01-15', 500000, 14, 'Mass Market', 'Brand Awareness', 'John Doe', 'john@example.com', '+254712345678', status, date))
     
     conn.commit()
     conn.close()
@@ -181,9 +194,18 @@ def get_station_contacts(station_name):
         return {'contact_person': result[0], 'contact_phone': result[1], 'contact_email': result[2], 'address': result[3], 'website': result[4]}
     return None
 
-def get_company_data(company_id):
+def get_company_data(company_id, year=None, month=None):
     conn = sqlite3.connect('ad_intelligence.db')
-    df = pd.read_sql_query("SELECT * FROM campaigns WHERE company_id = ? ORDER BY date DESC", conn, params=(company_id,))
+    query = "SELECT * FROM campaigns WHERE company_id = ?"
+    params = [company_id]
+    if year:
+        query += " AND strftime('%Y', date) = ?"
+        params.append(str(year))
+    if month:
+        query += " AND strftime('%m', date) = ?"
+        params.append(f"{month:02d}")
+    query += " ORDER BY date DESC"
+    df = pd.read_sql_query(query, conn, params=params)
     conn.close()
     return df
 
@@ -207,12 +229,30 @@ def create_booking_request(company_id, stations_list, campaign_goal, budget, dur
     conn.close()
     return booking_id
 
-def get_booking_requests(company_id=None):
+def get_booking_requests(company_id=None, year=None, month=None):
     conn = sqlite3.connect('ad_intelligence.db')
     if company_id:
-        df = pd.read_sql_query("SELECT * FROM booking_requests WHERE company_id = ? ORDER BY request_date DESC", conn, params=(company_id,))
+        query = "SELECT * FROM booking_requests WHERE company_id = ?"
+        params = [company_id]
+        if year:
+            query += " AND strftime('%Y', request_date) = ?"
+            params.append(str(year))
+        if month:
+            query += " AND strftime('%m', request_date) = ?"
+            params.append(f"{month:02d}")
+        query += " ORDER BY request_date DESC"
+        df = pd.read_sql_query(query, conn, params=params)
     else:
-        df = pd.read_sql_query("SELECT br.*, c.company_name FROM booking_requests br JOIN companies c ON br.company_id = c.company_id ORDER BY br.request_date DESC", conn)
+        query = "SELECT br.*, c.company_name FROM booking_requests br JOIN companies c ON br.company_id = c.company_id"
+        params = []
+        if year:
+            query += " WHERE strftime('%Y', br.request_date) = ?"
+            params.append(str(year))
+        if month and year:
+            query += " AND strftime('%m', br.request_date) = ?"
+            params.append(f"{month:02d}")
+        query += " ORDER BY br.request_date DESC"
+        df = pd.read_sql_query(query, conn, params=params)
     conn.close()
     return df
 
@@ -230,8 +270,8 @@ def update_booking_status(booking_id, status, admin_notes=None):
     conn.close()
     return True
 
-def get_booking_statistics(company_id=None):
-    df = get_booking_requests(company_id)
+def get_booking_statistics(company_id=None, year=None, month=None):
+    df = get_booking_requests(company_id, year, month)
     if df.empty:
         return {'total': 0, 'pending_approval': 0, 'approved': 0, 'confirmed': 0, 'suspended': 0}
     return {
@@ -252,25 +292,44 @@ def add_audience_lead(company_id, name, email, phone, product, message, source):
     conn.close()
     return lead_id
 
-def get_audience_leads(company_id=None):
+def get_audience_leads(company_id=None, year=None, month=None):
     conn = sqlite3.connect('ad_intelligence.db')
     if company_id:
-        df = pd.read_sql_query("SELECT * FROM audience_leads WHERE company_id = ? ORDER BY created_date DESC", conn, params=(company_id,))
+        query = "SELECT * FROM audience_leads WHERE company_id = ?"
+        params = [company_id]
+        if year:
+            query += " AND strftime('%Y', created_date) = ?"
+            params.append(str(year))
+        if month:
+            query += " AND strftime('%m', created_date) = ?"
+            params.append(f"{month:02d}")
+        query += " ORDER BY created_date DESC"
+        df = pd.read_sql_query(query, conn, params=params)
     else:
-        df = pd.read_sql_query("SELECT al.*, c.company_name FROM audience_leads al JOIN companies c ON al.company_id = c.company_id ORDER BY al.created_date DESC", conn)
+        query = "SELECT al.*, c.company_name FROM audience_leads al JOIN companies c ON al.company_id = c.company_id"
+        params = []
+        if year:
+            query += " WHERE strftime('%Y', al.created_date) = ?"
+            params.append(str(year))
+        if month and year:
+            query += " AND strftime('%m', al.created_date) = ?"
+            params.append(f"{month:02d}")
+        query += " ORDER BY al.created_date DESC"
+        df = pd.read_sql_query(query, conn, params=params)
     conn.close()
     return df
 
 def update_lead_status(lead_id, status):
     conn = sqlite3.connect('ad_intelligence.db')
     cursor = conn.cursor()
-    cursor.execute("UPDATE audience_leads SET status=?, last_contacted=? WHERE lead_id=?", (status, datetime.now().isoformat(), lead_id))
+    converted_date = datetime.now().isoformat() if status == 'converted' else None
+    cursor.execute("UPDATE audience_leads SET status=?, last_contacted=?, converted_date=? WHERE lead_id=?", (status, datetime.now().isoformat(), converted_date, lead_id))
     conn.commit()
     conn.close()
     return True
 
-def get_lead_statistics(company_id=None):
-    df = get_audience_leads(company_id)
+def get_lead_statistics(company_id=None, year=None, month=None):
+    df = get_audience_leads(company_id, year, month)
     if df.empty:
         return {'total': 0, 'new': 0, 'contacted': 0, 'converted': 0, 'conversion_rate': 0}
     total = len(df)
@@ -282,6 +341,16 @@ def get_lead_statistics(company_id=None):
         'converted': converted,
         'conversion_rate': round(converted/total*100, 1) if total > 0 else 0
     }
+
+def get_available_years(company_id=None):
+    conn = sqlite3.connect('ad_intelligence.db')
+    if company_id:
+        df = pd.read_sql_query("SELECT DISTINCT strftime('%Y', date) as year FROM campaigns WHERE company_id = ? UNION SELECT DISTINCT strftime('%Y', request_date) FROM booking_requests WHERE company_id = ?", conn, params=(company_id, company_id))
+    else:
+        df = pd.read_sql_query("SELECT DISTINCT strftime('%Y', date) as year FROM campaigns UNION SELECT DISTINCT strftime('%Y', request_date) FROM booking_requests", conn)
+    conn.close()
+    years = df['year'].dropna().tolist()
+    return sorted(years, reverse=True) if years else [datetime.now().year]
 
 # ============================================================================
 # STATION DATABASE CLASS
@@ -363,180 +432,263 @@ class MediaRecommendationEngine:
         return recommendations[:5]
 
 # ============================================================================
-# CUSTOM CSS - FULL WIDTH RESPONSIVE
+# CUSTOM CSS - PROFESSIONAL DESIGN
 # ============================================================================
 st.markdown("""
 <style>
-    /* Main container - full width */
+    /* Main container */
     .main .block-container {
         padding-top: 1rem;
-        padding-bottom: 1rem;
+        padding-bottom: 2rem;
         max-width: 1400px;
         margin: 0 auto;
     }
     
-    /* Header styling */
-    .main-header {
+    /* Header styling - VISIBLE AND BEAUTIFUL */
+    .app-header {
         background: linear-gradient(135deg, #004953 0%, #006B7A 100%);
         padding: 1.5rem 2rem;
         border-radius: 16px;
-        margin-bottom: 1.5rem;
+        margin-bottom: 2rem;
         display: flex;
         justify-content: space-between;
         align-items: center;
         flex-wrap: wrap;
+        box-shadow: 0 4px 20px rgba(0,73,83,0.15);
     }
     .header-title h1 {
         color: white;
         margin: 0;
-        font-size: 1.5rem;
+        font-size: 1.6rem;
+        font-weight: 600;
     }
     .header-title p {
         color: rgba(255,255,255,0.85);
         margin: 0.25rem 0 0 0;
-        font-size: 0.8rem;
+        font-size: 0.85rem;
     }
     .logout-btn {
-        background: rgba(255,255,255,0.2);
+        background: rgba(255,255,255,0.15);
         border: 1px solid rgba(255,255,255,0.3);
-        border-radius: 8px;
-        padding: 0.5rem 1rem;
+        border-radius: 10px;
+        padding: 0.5rem 1.2rem;
         color: white;
         cursor: pointer;
         transition: all 0.2s;
+        font-weight: 500;
     }
     .logout-btn:hover {
-        background: rgba(255,255,255,0.3);
+        background: rgba(255,255,255,0.25);
+        transform: translateY(-1px);
     }
     
-    /* Metric cards - responsive grid */
+    /* Login page styling */
+    .login-container {
+        max-width: 450px;
+        margin: 0 auto;
+        padding: 2rem;
+        background: white;
+        border-radius: 20px;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.08);
+        border: 1px solid #E2E8F0;
+    }
+    .login-header {
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+    .login-header h2 {
+        color: #004953;
+        margin-bottom: 0.5rem;
+    }
+    .login-header p {
+        color: #64748B;
+        font-size: 0.85rem;
+    }
+    
+    /* Metric cards */
     .metric-card {
         background: white;
-        border-radius: 12px;
-        padding: 1rem;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-        border-left: 3px solid #C6A43F;
+        border-radius: 16px;
+        padding: 1.2rem;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+        border-left: 4px solid #C6A43F;
         text-align: center;
+        transition: transform 0.2s;
+    }
+    .metric-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 8px 24px rgba(0,0,0,0.08);
     }
     .metric-value {
-        font-size: 1.5rem;
+        font-size: 1.8rem;
         font-weight: 700;
         color: #004953;
     }
     .metric-label {
-        font-size: 0.7rem;
+        font-size: 0.75rem;
         color: #64748B;
         text-transform: uppercase;
         letter-spacing: 0.5px;
+        font-weight: 600;
     }
     
     /* Section cards */
     .section-card {
         background: white;
-        border-radius: 16px;
+        border-radius: 20px;
         padding: 1.5rem;
         margin-bottom: 1.5rem;
         border: 1px solid #E2E8F0;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+    }
+    .section-title {
+        font-size: 1.2rem;
+        font-weight: 600;
+        color: #1E293B;
+        margin-bottom: 1.2rem;
+        padding-bottom: 0.75rem;
+        border-bottom: 2px solid #C6A43F;
+        display: inline-block;
     }
     
     /* Recommendation cards */
     .rec-card {
         background: linear-gradient(135deg, #004953 0%, #003540 100%);
-        border-radius: 12px;
-        padding: 1rem;
+        border-radius: 16px;
+        padding: 1.2rem;
         color: white;
-        margin-bottom: 0.75rem;
+        margin-bottom: 1rem;
+        transition: transform 0.2s;
+    }
+    .rec-card:hover {
+        transform: translateX(5px);
     }
     .rec-card h4 {
         color: #C6A43F;
-        margin: 0 0 0.5rem 0;
-        font-size: 1rem;
+        margin: 0 0 0.6rem 0;
+        font-size: 1.1rem;
     }
     .rec-card p {
-        margin: 0.25rem 0;
+        margin: 0.3rem 0;
         font-size: 0.85rem;
         opacity: 0.9;
     }
     
-    /* Booking cards */
+    /* Booking cards - improved layout */
     .booking-card {
         background: #FFFBEB;
         border: 1px solid #FDE68A;
-        border-radius: 12px;
-        padding: 1rem;
+        border-radius: 16px;
+        padding: 1.2rem;
         margin-bottom: 1rem;
+        transition: all 0.2s;
+    }
+    .booking-card:hover {
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
     }
     .booking-card-pending {
-        border-left: 4px solid #F59E0B;
+        border-left: 5px solid #F59E0B;
         background: #FFFBEB;
     }
     .booking-card-approved {
-        border-left: 4px solid #8B5CF6;
+        border-left: 5px solid #8B5CF6;
         background: #F5F3FF;
     }
     .booking-card-confirmed {
-        border-left: 4px solid #10B981;
+        border-left: 5px solid #10B981;
         background: #ECFDF5;
+    }
+    .booking-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-bottom: 0.75rem;
+    }
+    .booking-id {
+        font-weight: 700;
+        font-size: 1rem;
+        color: #1E293B;
+    }
+    .booking-date {
+        font-size: 0.75rem;
+        color: #64748B;
+    }
+    .booking-details {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 0.5rem;
+        margin: 0.75rem 0;
+    }
+    .booking-detail-item {
+        font-size: 0.85rem;
+    }
+    .booking-detail-label {
+        font-weight: 600;
+        color: #475569;
     }
     
     /* Lead cards */
     .lead-card {
-        background: #F0FDF4;
-        border: 1px solid #86EFAC;
-        border-radius: 12px;
-        padding: 1rem;
+        background: #F8FAFC;
+        border: 1px solid #E2E8F0;
+        border-radius: 16px;
+        padding: 1.2rem;
+        margin-bottom: 1rem;
+        transition: all 0.2s;
+    }
+    .lead-card:hover {
+        border-color: #C6A43F;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    }
+    .lead-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
         margin-bottom: 0.75rem;
+    }
+    .lead-name {
+        font-weight: 700;
+        font-size: 1rem;
+        color: #1E293B;
+    }
+    .lead-contact {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 0.5rem;
+        margin: 0.5rem 0;
+        font-size: 0.8rem;
+        color: #475569;
+    }
+    .lead-message {
+        background: white;
+        padding: 0.75rem;
+        border-radius: 12px;
+        margin-top: 0.5rem;
+        font-size: 0.85rem;
+        color: #334155;
+        border-left: 3px solid #C6A43F;
     }
     
     /* Status badges */
-    .badge-pending {
-        background: #F59E0B;
-        color: white;
-        padding: 0.25rem 0.75rem;
-        border-radius: 20px;
-        font-size: 0.7rem;
-        display: inline-block;
-    }
-    .badge-approved {
-        background: #8B5CF6;
-        color: white;
-        padding: 0.25rem 0.75rem;
-        border-radius: 20px;
-        font-size: 0.7rem;
-        display: inline-block;
-    }
-    .badge-confirmed {
-        background: #10B981;
-        color: white;
-        padding: 0.25rem 0.75rem;
-        border-radius: 20px;
-        font-size: 0.7rem;
-        display: inline-block;
-    }
-    .badge-new {
-        background: #10B981;
-        color: white;
-        padding: 0.25rem 0.75rem;
-        border-radius: 20px;
-        font-size: 0.7rem;
-        display: inline-block;
-    }
-    .badge-contacted {
-        background: #F59E0B;
-        color: white;
-        padding: 0.25rem 0.75rem;
-        border-radius: 20px;
-        font-size: 0.7rem;
-        display: inline-block;
-    }
-    .badge-converted {
-        background: #8B5CF6;
-        color: white;
-        padding: 0.25rem 0.75rem;
-        border-radius: 20px;
-        font-size: 0.7rem;
-        display: inline-block;
+    .badge-pending { background: #F59E0B; color: white; padding: 0.25rem 0.9rem; border-radius: 20px; font-size: 0.7rem; font-weight: 600; display: inline-block; }
+    .badge-approved { background: #8B5CF6; color: white; padding: 0.25rem 0.9rem; border-radius: 20px; font-size: 0.7rem; font-weight: 600; display: inline-block; }
+    .badge-confirmed { background: #10B981; color: white; padding: 0.25rem 0.9rem; border-radius: 20px; font-size: 0.7rem; font-weight: 600; display: inline-block; }
+    .badge-new { background: #10B981; color: white; padding: 0.25rem 0.9rem; border-radius: 20px; font-size: 0.7rem; font-weight: 600; display: inline-block; }
+    .badge-contacted { background: #F59E0B; color: white; padding: 0.25rem 0.9rem; border-radius: 20px; font-size: 0.7rem; font-weight: 600; display: inline-block; }
+    .badge-converted { background: #8B5CF6; color: white; padding: 0.25rem 0.9rem; border-radius: 20px; font-size: 0.7rem; font-weight: 600; display: inline-block; }
+    
+    /* Time filter bar */
+    .time-filter-bar {
+        background: #F8FAFC;
+        padding: 1rem;
+        border-radius: 16px;
+        margin-bottom: 1.5rem;
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+        flex-wrap: wrap;
     }
     
     /* Button styling */
@@ -544,8 +696,8 @@ st.markdown("""
         background: #004953;
         color: white;
         border: none;
-        border-radius: 8px;
-        padding: 0.5rem 1.25rem;
+        border-radius: 10px;
+        padding: 0.6rem 1.5rem;
         font-weight: 500;
         transition: all 0.2s;
         width: 100%;
@@ -553,16 +705,17 @@ st.markdown("""
     .stButton > button:hover {
         background: #006B7A;
         transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(0,73,83,0.2);
     }
     
     /* Footer */
     .footer {
         text-align: center;
-        padding: 1rem;
+        padding: 1.5rem;
         margin-top: 2rem;
         background: #F8FAFC;
-        border-radius: 12px;
-        font-size: 0.7rem;
+        border-radius: 16px;
+        font-size: 0.75rem;
         color: #64748B;
     }
     
@@ -571,12 +724,12 @@ st.markdown("""
         gap: 0.5rem;
         background: #F1F5F9;
         padding: 0.5rem;
-        border-radius: 12px;
+        border-radius: 14px;
         margin-bottom: 1.5rem;
     }
     .stTabs [data-baseweb="tab"] {
-        border-radius: 8px;
-        padding: 0.5rem 1.25rem;
+        border-radius: 10px;
+        padding: 0.6rem 1.5rem;
         font-size: 0.85rem;
         font-weight: 500;
     }
@@ -585,35 +738,42 @@ st.markdown("""
         color: white;
     }
     
-    /* Hide default Streamlit branding */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    
-    /* Responsive adjustments */
-    @media (max-width: 768px) {
-        .main-header {
-            flex-direction: column;
-            text-align: center;
-            gap: 1rem;
-        }
-        .metric-value {
-            font-size: 1.2rem;
-        }
-    }
-    
     /* Expander styling */
     .streamlit-expanderHeader {
         background: #F8FAFC;
-        border-radius: 8px;
+        border-radius: 10px;
         font-weight: 500;
     }
     
-    /* Dataframe styling */
-    .dataframe {
-        font-size: 0.85rem;
-    }
+    /* Hide default Streamlit branding */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
+
+# ============================================================================
+# TIME FILTER COMPONENT
+# ============================================================================
+def render_time_filter(company_id=None):
+    """Render year and month selectors for filtering historical data"""
+    available_years = get_available_years(company_id)
+    current_year = datetime.now().year
+    
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        selected_year = st.selectbox(
+            "📅 Select Year",
+            options=available_years,
+            index=0 if available_years else 0,
+            key="year_filter"
+        )
+    with col2:
+        months = ["All Months", "January", "February", "March", "April", "May", "June", 
+                  "July", "August", "September", "October", "November", "December"]
+        selected_month_name = st.selectbox("📆 Select Month", options=months, key="month_filter")
+        selected_month = None if selected_month_name == "All Months" else months.index(selected_month_name)
+    
+    return selected_year, selected_month
 
 # ============================================================================
 # LOGIN SYSTEM
@@ -628,19 +788,28 @@ def check_login(username, password):
 
 def show_login():
     st.markdown("""
-    <div class="main-header">
+    <div class="app-header">
         <div class="header-title">
             <h1>🎯 Ad Intelligence Kenya</h1>
             <p>Data-driven advertising analytics platform</p>
         </div>
+        <div></div>
     </div>
     """, unsafe_allow_html=True)
     
-    col1, col2, col3 = st.columns([1, 2, 1])
+    col1, col2, col3 = st.columns([1, 1.5, 1])
     with col2:
-        st.markdown("### 🔐 Login to Your Account")
-        username = st.text_input("Username", placeholder="Enter your username")
-        password = st.text_input("Password", type="password", placeholder="Enter your password")
+        st.markdown("""
+        <div class="login-container">
+            <div class="login-header">
+                <h2>🔐 Welcome Back</h2>
+                <p>Sign in to access your advertising intelligence dashboard</p>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        username = st.text_input("Username", placeholder="Enter your username", key="login_username")
+        password = st.text_input("Password", type="password", placeholder="Enter your password", key="login_password")
         
         if st.button("Login", use_container_width=True):
             user = check_login(username, password)
@@ -652,24 +821,27 @@ def show_login():
                 st.session_state.company_id = user[3]
                 st.rerun()
             else:
-                st.error("Invalid username or password")
+                st.error("❌ Invalid username or password")
         
-        st.markdown("---")
-        st.caption("**Demo Accounts:**")
-        st.caption("📊 Admin: username='admin', password='admin123'")
-        st.caption("🏢 Client: username='safaricom', password='client123'")
+        st.markdown("""
+        <div style="text-align: center; margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #E2E8F0;">
+            <p style="font-size: 0.75rem; color: #64748B;">Demo Accounts:</p>
+            <p style="font-size: 0.7rem; color: #475569;">📊 Admin: <strong>admin</strong> / <strong>admin123</strong></p>
+            <p style="font-size: 0.7rem; color: #475569;">🏢 Client: <strong>safaricom</strong> / <strong>client123</strong></p>
+        </div>
+        """, unsafe_allow_html=True)
 
 # ============================================================================
 # ADMIN DASHBOARD
 # ============================================================================
 def show_admin_dashboard():
     # Header with logout
-    col1, col2 = st.columns([4, 1])
+    col1, col2 = st.columns([5, 1])
     with col1:
         st.markdown("""
         <div class="header-title">
             <h1>📊 Admin Dashboard</h1>
-            <p>System-wide advertising intelligence</p>
+            <p>Complete overview of all advertising activities</p>
         </div>
         """, unsafe_allow_html=True)
     with col2:
@@ -677,9 +849,21 @@ def show_admin_dashboard():
             st.session_state.logged_in = False
             st.rerun()
     
+    # Time filter
+    st.markdown('<div class="time-filter-bar">', unsafe_allow_html=True)
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        selected_year = st.selectbox("📅 Select Year", options=[2023, 2024, 2025], index=1)
+    with col2:
+        months = ["All Months", "January", "February", "March", "April", "May", "June", 
+                  "July", "August", "September", "October", "November", "December"]
+        selected_month_name = st.selectbox("📆 Select Month", options=months)
+        selected_month = None if selected_month_name == "All Months" else months.index(selected_month_name)
+    st.markdown('</div>', unsafe_allow_html=True)
+    
     all_companies = get_all_companies()
-    all_bookings = get_booking_requests()
-    all_leads = get_audience_leads()
+    all_bookings = get_booking_requests(year=selected_year, month=selected_month)
+    all_leads = get_audience_leads(year=selected_year, month=selected_month)
     
     # Statistics Row
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -702,22 +886,29 @@ def show_admin_dashboard():
     
     with tab1:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("#### Pending Approval Requests")
+        st.markdown('<p class="section-title">Pending Approval Requests</p>', unsafe_allow_html=True)
         pending_bookings = all_bookings[all_bookings['status'] == 'pending_approval'] if not all_bookings.empty else pd.DataFrame()
         if not pending_bookings.empty:
             for _, b in pending_bookings.iterrows():
                 st.markdown(f"""
                 <div class="booking-card booking-card-pending">
-                    <p><strong>Booking #{b['booking_id']}</strong> - {b['request_date'][:10] if b['request_date'] else 'N/A'}</p>
-                    <p><strong>Company:</strong> {b.get('company_name', 'N/A')}</p>
-                    <p><strong>Stations:</strong> {b.get('selected_stations', b['station_name'])}</p>
-                    <p><strong>Budget:</strong> KES {b['budget_kes']:,.0f} | <strong>Duration:</strong> {b['duration_days']} days</p>
-                    <p><strong>Contact:</strong> {b['contact_name']} - {b['contact_email']}</p>
+                    <div class="booking-header">
+                        <span class="booking-id">Booking #{b['booking_id']}</span>
+                        <span class="booking-date">{b['request_date'][:10] if b['request_date'] else 'N/A'}</span>
+                    </div>
+                    <div class="booking-details">
+                        <div class="booking-detail-item"><span class="booking-detail-label">Company:</span> {b.get('company_name', 'N/A')}</div>
+                        <div class="booking-detail-item"><span class="booking-detail-label">Stations:</span> {b.get('selected_stations', b['station_name'])}</div>
+                        <div class="booking-detail-item"><span class="booking-detail-label">Budget:</span> KES {b['budget_kes']:,.0f}</div>
+                        <div class="booking-detail-item"><span class="booking-detail-label">Duration:</span> {b['duration_days']} days</div>
+                        <div class="booking-detail-item"><span class="booking-detail-label">Contact:</span> {b['contact_name']}</div>
+                        <div class="booking-detail-item"><span class="booking-detail-label">Email:</span> {b['contact_email']}</div>
+                    </div>
                 </div>
                 """, unsafe_allow_html=True)
                 col1, col2 = st.columns(2)
                 with col1:
-                    notes = st.text_area("Admin Notes", key=f"notes_{b['booking_id']}", placeholder="Add notes about this approval...")
+                    notes = st.text_area("Admin Notes", key=f"notes_{b['booking_id']}", placeholder="Add notes...")
                 with col2:
                     if st.button(f"✅ Approve", key=f"approve_{b['booking_id']}"):
                         update_booking_status(b['booking_id'], 'approved', notes)
@@ -733,9 +924,9 @@ def show_admin_dashboard():
     
     with tab2:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("#### All Audience Leads")
+        st.markdown('<p class="section-title">All Audience Leads</p>', unsafe_allow_html=True)
         if not all_leads.empty:
-            lead_stats = get_lead_statistics()
+            lead_stats = get_lead_statistics(year=selected_year, month=selected_month)
             col1, col2, col3, col4 = st.columns(4)
             with col1:
                 st.markdown(f'<div class="metric-card"><div class="metric-label">📊 Total</div><div class="metric-value">{lead_stats["total"]}</div></div>', unsafe_allow_html=True)
@@ -750,10 +941,19 @@ def show_admin_dashboard():
                 status_badge = '<span class="badge-new">NEW</span>' if lead['status'] == 'new' else '<span class="badge-contacted">CONTACTED</span>' if lead['status'] == 'contacted' else '<span class="badge-converted">CONVERTED</span>'
                 st.markdown(f"""
                 <div class="lead-card">
-                    <p><strong>{lead['lead_name']}</strong> {status_badge} - {lead['created_date'][:10] if lead['created_date'] else 'N/A'}</p>
-                    <p><strong>Company:</strong> {lead.get('company_name', 'N/A')} | <strong>Phone:</strong> {lead['lead_phone']} | <strong>Email:</strong> {lead['lead_email']}</p>
-                    <p><strong>Interest:</strong> {lead['interest_product']}</p>
-                    <p><strong>Message:</strong> {lead['message'][:150] if lead['message'] else 'No message'}</p>
+                    <div class="lead-header">
+                        <span class="lead-name">{lead['lead_name']}</span>
+                        <span>{status_badge}</span>
+                    </div>
+                    <div class="lead-contact">
+                        <span>📞 {lead['lead_phone']}</span>
+                        <span>📧 {lead['lead_email']}</span>
+                        <span>🏢 {lead.get('company_name', 'N/A')}</span>
+                    </div>
+                    <div class="lead-message">
+                        <strong>💬 Interest:</strong> {lead['interest_product']}<br>
+                        <strong>📝 Message:</strong> {lead['message'][:150] if lead['message'] else 'No message'}
+                    </div>
                 </div>
                 """, unsafe_allow_html=True)
                 if lead['status'] == 'new':
@@ -762,12 +962,12 @@ def show_admin_dashboard():
                         st.rerun()
                 st.markdown("---")
         else:
-            st.info("No leads yet")
+            st.info("No leads found for selected period")
         st.markdown('</div>', unsafe_allow_html=True)
     
     with tab3:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("#### Media Directory with Contacts")
+        st.markdown('<p class="section-title">Media Directory with Contacts</p>', unsafe_allow_html=True)
         station_db = StationDatabase()
         for station in station_db.get_all_stations_with_contacts():
             with st.expander(f"📺 {station['name']} ({station['media_type']}) - {station['region']}"):
@@ -785,7 +985,7 @@ def show_admin_dashboard():
     
     with tab4:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("#### Registered Companies")
+        st.markdown('<p class="section-title">Registered Companies</p>', unsafe_allow_html=True)
         if not all_companies.empty:
             st.dataframe(all_companies, use_container_width=True, hide_index=True)
         st.markdown('</div>', unsafe_allow_html=True)
@@ -804,12 +1004,12 @@ def show_client_portal():
     conn.close()
     
     # Header with logout
-    col1, col2 = st.columns([4, 1])
+    col1, col2 = st.columns([5, 1])
     with col1:
         st.markdown(f"""
         <div class="header-title">
             <h1>👋 Welcome, {company_name}</h1>
-            <p>Your personalized advertising dashboard</p>
+            <p>Your personalized advertising intelligence dashboard</p>
         </div>
         """, unsafe_allow_html=True)
     with col2:
@@ -817,8 +1017,21 @@ def show_client_portal():
             st.session_state.logged_in = False
             st.rerun()
     
-    lead_stats = get_lead_statistics(company_id)
-    booking_stats = get_booking_statistics(company_id)
+    # Time filter
+    st.markdown('<div class="time-filter-bar">', unsafe_allow_html=True)
+    available_years = get_available_years(company_id)
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        selected_year = st.selectbox("📅 Select Year", options=available_years, index=0 if available_years else 0)
+    with col2:
+        months = ["All Months", "January", "February", "March", "April", "May", "June", 
+                  "July", "August", "September", "October", "November", "December"]
+        selected_month_name = st.selectbox("📆 Select Month", options=months)
+        selected_month = None if selected_month_name == "All Months" else months.index(selected_month_name)
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    lead_stats = get_lead_statistics(company_id, selected_year, selected_month)
+    booking_stats = get_booking_statistics(company_id, selected_year, selected_month)
     
     # Metrics Row
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -840,7 +1053,7 @@ def show_client_portal():
     # Tab 1: Recommendations
     with tab1:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("#### 🎯 AI-Powered Media Recommendation Engine")
+        st.markdown('<p class="section-title">🎯 AI-Powered Media Recommendation Engine</p>', unsafe_allow_html=True)
         
         engine = MediaRecommendationEngine()
         station_db = StationDatabase()
@@ -919,8 +1132,8 @@ def show_client_portal():
     # Tab 2: My Bookings
     with tab2:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("#### 📋 My Booking Requests")
-        bookings = get_booking_requests(company_id)
+        st.markdown('<p class="section-title">📋 My Booking Requests</p>', unsafe_allow_html=True)
+        bookings = get_booking_requests(company_id, selected_year, selected_month)
         if not bookings.empty:
             col1, col2, col3, col4 = st.columns(4)
             with col1:
@@ -953,10 +1166,19 @@ def show_client_portal():
                 
                 st.markdown(f"""
                 <div class="booking-card {border_class}">
-                    <p><strong>Booking #{b['booking_id']}</strong> - {b['request_date'][:10] if b['request_date'] else 'N/A'}</p>
-                    <p><strong>Stations:</strong> {b.get('selected_stations', b['station_name'])}</p>
-                    <p><strong>Budget:</strong> KES {b['budget_kes']:,.0f} | <strong>Duration:</strong> {b['duration_days']} days</p>
-                    <p><strong>Status:</strong> <span class="{badge}">{text}</span></p>
+                    <div class="booking-header">
+                        <span class="booking-id">Booking #{b['booking_id']}</span>
+                        <span class="booking-date">{b['request_date'][:10] if b['request_date'] else 'N/A'}</span>
+                    </div>
+                    <div class="booking-details">
+                        <div class="booking-detail-item"><span class="booking-detail-label">Stations:</span> {b.get('selected_stations', b['station_name'])}</div>
+                        <div class="booking-detail-item"><span class="booking-detail-label">Budget:</span> KES {b['budget_kes']:,.0f}</div>
+                        <div class="booking-detail-item"><span class="booking-detail-label">Duration:</span> {b['duration_days']} days</div>
+                        <div class="booking-detail-item"><span class="booking-detail-label">Goal:</span> {b.get('campaign_goal', 'N/A')}</div>
+                    </div>
+                    <div style="margin-top: 0.5rem;">
+                        <span class="{badge}">{text}</span>
+                    </div>
                 </div>
                 """, unsafe_allow_html=True)
                 
@@ -969,13 +1191,13 @@ def show_client_portal():
                     st.info("⏳ Waiting for admin approval...")
                 st.markdown("---")
         else:
-            st.info("No bookings yet. Generate recommendations and submit a booking.")
+            st.info("No bookings found for selected period. Generate recommendations and submit a booking.")
         st.markdown('</div>', unsafe_allow_html=True)
     
     # Tab 3: My Leads
     with tab3:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("#### 👥 My Leads")
+        st.markdown('<p class="section-title">👥 My Leads</p>', unsafe_allow_html=True)
         
         with st.expander("📝 Demo: Submit a Test Lead", expanded=False):
             test_name = st.text_input("Name", "John Kamau", key="test_name")
@@ -988,17 +1210,25 @@ def show_client_portal():
                 st.success("Test lead added!")
                 st.rerun()
         
-        leads = get_audience_leads(company_id)
+        leads = get_audience_leads(company_id, selected_year, selected_month)
         if not leads.empty:
             st.markdown(f"#### Your Leads ({len(leads[leads['status'] == 'new'])} new)")
             for _, lead in leads.iterrows():
                 status_badge = '<span class="badge-new">NEW</span>' if lead['status'] == 'new' else '<span class="badge-contacted">CONTACTED</span>' if lead['status'] == 'contacted' else '<span class="badge-converted">CONVERTED</span>'
                 st.markdown(f"""
                 <div class="lead-card">
-                    <p><strong>{lead['lead_name']}</strong> {status_badge} - {lead['created_date'][:10] if lead['created_date'] else 'N/A'}</p>
-                    <p><strong>Phone:</strong> {lead['lead_phone']} | <strong>Email:</strong> {lead['lead_email']}</p>
-                    <p><strong>Interest:</strong> {lead['interest_product']}</p>
-                    <p><strong>Message:</strong> {lead['message'][:150] if lead['message'] else 'No message'}</p>
+                    <div class="lead-header">
+                        <span class="lead-name">{lead['lead_name']}</span>
+                        <span>{status_badge}</span>
+                    </div>
+                    <div class="lead-contact">
+                        <span>📞 {lead['lead_phone']}</span>
+                        <span>📧 {lead['lead_email']}</span>
+                    </div>
+                    <div class="lead-message">
+                        <strong>💬 Interest:</strong> {lead['interest_product']}<br>
+                        <strong>📝 Message:</strong> {lead['message'][:150] if lead['message'] else 'No message'}
+                    </div>
                 </div>
                 """, unsafe_allow_html=True)
                 if lead['status'] == 'new':
@@ -1008,17 +1238,17 @@ def show_client_portal():
                 st.markdown("---")
             
             # Lead statistics
-            st.markdown("#### Lead Status Summary")
+            st.markdown("#### 📊 Lead Status Summary")
             status_counts = leads.groupby('status').size().reset_index(name='count')
             st.dataframe(status_counts, use_container_width=True, hide_index=True)
         else:
-            st.info("No leads yet. Use the demo form above to test lead capture.")
+            st.info("No leads found for selected period. Use the demo form above to test lead capture.")
         st.markdown('</div>', unsafe_allow_html=True)
     
     # Tab 4: Media Directory
     with tab4:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("#### 📺 📻 Media Directory")
+        st.markdown('<p class="section-title">📺 📻 Media Directory</p>', unsafe_allow_html=True)
         station_db = StationDatabase()
         region_filter = st.selectbox("Filter by Region", ["All", "National", "Coast", "Western", "Central"])
         
@@ -1036,9 +1266,9 @@ def show_client_portal():
                             st.write(f"📧 {station['contacts']['contact_email']}")
         st.markdown('</div>', unsafe_allow_html=True)
     
-    # Tab 5: Performance
+    # Tab 5: Performance with time filter
     with tab5:
-        df = get_company_data(company_id)
+        df = get_company_data(company_id, selected_year, selected_month)
         if not df.empty:
             total_spend = df['spend_kes'].sum()
             total_revenue = df['revenue_kes'].sum()
@@ -1059,7 +1289,7 @@ def show_client_portal():
             fig.update_layout(height=400, plot_bgcolor='white', showlegend=False, margin=dict(l=0, r=0, t=30, b=0))
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("No campaign data available")
+            st.info("No campaign data available for selected period")
 
 # ============================================================================
 # MAIN
