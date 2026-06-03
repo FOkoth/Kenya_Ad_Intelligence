@@ -9,23 +9,27 @@ from services.bookings import get_bookings, update_booking_status, get_booking_s
 from services.leads import get_leads, update_lead_status, get_lead_statistics
 from services.stations import get_all_stations
 from assets.styles import apply_styles
-from utils.helpers import format_currency, format_date, get_month_name
+from utils.helpers import format_currency, format_date
 
 def render():
     apply_styles()
     
-    # Header with logout
+    # Header with gradient background
     col1, col2 = st.columns([5, 1])
     with col1:
         st.markdown("""
-        <div class="header-title">
-            <h1>📊 Admin Dashboard</h1>
-            <p>Complete overview of all advertising activities</p>
+        <div class="app-header">
+            <div class="header-title">
+                <h1>📊 Admin Dashboard</h1>
+                <p>Complete overview of all advertising activities</p>
+            </div>
+            <div></div>
         </div>
         """, unsafe_allow_html=True)
     with col2:
         if st.button("🚪 Logout", use_container_width=True):
-            st.session_state.logged_in = False
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
             st.rerun()
     
     # Time filter
@@ -48,17 +52,17 @@ def render():
     lead_stats = get_lead_statistics(year=selected_year, month=selected_month)
     
     # Statistics Row
-    col1, col2, col3, col4, col5 = st.columns(5)
-    with col1:
-        st.markdown(f'<div class="metric-card"><div class="metric-label">🏢 Companies</div><div class="metric-value">{len(all_companies)}</div></div>', unsafe_allow_html=True)
-    with col2:
-        st.markdown(f'<div class="metric-card"><div class="metric-label">📋 Bookings</div><div class="metric-value">{booking_stats["total"]}</div></div>', unsafe_allow_html=True)
-    with col3:
-        st.markdown(f'<div class="metric-card"><div class="metric-label">⏳ Pending</div><div class="metric-value">{booking_stats["pending_approval"]}</div></div>', unsafe_allow_html=True)
-    with col4:
-        st.markdown(f'<div class="metric-card"><div class="metric-label">✅ Confirmed</div><div class="metric-value">{booking_stats["confirmed"]}</div></div>', unsafe_allow_html=True)
-    with col5:
-        st.markdown(f'<div class="metric-card"><div class="metric-label">👥 Leads</div><div class="metric-value">{lead_stats["total"]}</div></div>', unsafe_allow_html=True)
+    cols = st.columns(5)
+    metrics = [
+        ("🏢 Companies", len(all_companies)),
+        ("📋 Bookings", booking_stats["total"]),
+        ("⏳ Pending", booking_stats["pending_approval"]),
+        ("✅ Confirmed", booking_stats["confirmed"]),
+        ("👥 Leads", lead_stats["total"])
+    ]
+    for col, (label, value) in zip(cols, metrics):
+        with col:
+            st.markdown(f'<div class="metric-card"><div class="metric-label">{label}</div><div class="metric-value">{value}</div></div>', unsafe_allow_html=True)
     
     st.markdown("---")
     
@@ -79,12 +83,12 @@ def render():
                         <span class="booking-date">{format_date(b['request_date'])}</span>
                     </div>
                     <div class="booking-details">
-                        <div class="booking-detail-item"><span class="booking-detail-label">Company:</span> {b.get('company_name', 'N/A')}</div>
-                        <div class="booking-detail-item"><span class="booking-detail-label">Stations:</span> {b.get('selected_stations', b['station_name'])}</div>
-                        <div class="booking-detail-item"><span class="booking-detail-label">Budget:</span> {format_currency(b['budget_kes'])}</div>
-                        <div class="booking-detail-item"><span class="booking-detail-label">Duration:</span> {b['duration_days']} days</div>
-                        <div class="booking-detail-item"><span class="booking-detail-label">Contact:</span> {b['contact_name']}</div>
-                        <div class="booking-detail-item"><span class="booking-detail-label">Email:</span> {b['contact_email']}</div>
+                        <div><span class="booking-detail-label">Company:</span> {b.get('company_name', 'N/A')}</div>
+                        <div><span class="booking-detail-label">Stations:</span> {b.get('selected_stations', b['station_name'])}</div>
+                        <div><span class="booking-detail-label">Budget:</span> {format_currency(b['budget_kes'])}</div>
+                        <div><span class="booking-detail-label">Duration:</span> {b['duration_days']} days</div>
+                        <div><span class="booking-detail-label">Contact:</span> {b['contact_name']}</div>
+                        <div><span class="booking-detail-label">Email:</span> {b['contact_email']}</div>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
@@ -111,15 +115,16 @@ def render():
         st.markdown('<p class="section-title">All Audience Leads</p>', unsafe_allow_html=True)
         
         if not all_leads.empty:
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.markdown(f'<div class="metric-card"><div class="metric-label">📊 Total</div><div class="metric-value">{lead_stats["total"]}</div></div>', unsafe_allow_html=True)
-            with col2:
-                st.markdown(f'<div class="metric-card"><div class="metric-label">🆕 New</div><div class="metric-value">{lead_stats["new"]}</div></div>', unsafe_allow_html=True)
-            with col3:
-                st.markdown(f'<div class="metric-card"><div class="metric-label">✅ Converted</div><div class="metric-value">{lead_stats["converted"]}</div></div>', unsafe_allow_html=True)
-            with col4:
-                st.markdown(f'<div class="metric-card"><div class="metric-label">📈 Conv. Rate</div><div class="metric-value">{lead_stats["conversion_rate"]}%</div></div>', unsafe_allow_html=True)
+            cols = st.columns(4)
+            lead_metrics = [
+                ("📊 Total", lead_stats["total"]),
+                ("🆕 New", lead_stats["new"]),
+                ("✅ Converted", lead_stats["converted"]),
+                ("📈 Conv. Rate", f"{lead_stats['conversion_rate']}%")
+            ]
+            for col, (label, value) in zip(cols, lead_metrics):
+                with col:
+                    st.markdown(f'<div class="metric-card"><div class="metric-label">{label}</div><div class="metric-value">{value}</div></div>', unsafe_allow_html=True)
             st.markdown("---")
             
             for _, lead in all_leads.iterrows():
@@ -127,7 +132,7 @@ def render():
                 st.markdown(f"""
                 <div class="lead-card">
                     <div class="lead-header">
-                        <span class="lead-name">{lead['lead_name']}</span>
+                        <strong>{lead['lead_name']}</strong>
                         <span>{status_badge}</span>
                     </div>
                     <div class="lead-contact">
@@ -135,10 +140,8 @@ def render():
                         <span>📧 {lead['lead_email']}</span>
                         <span>🏢 {lead.get('company_name', 'N/A')}</span>
                     </div>
-                    <div class="lead-message">
-                        <strong>💬 Interest:</strong> {lead['interest_product']}<br>
-                        <strong>📝 Message:</strong> {lead['message'][:150] if lead['message'] else 'No message'}
-                    </div>
+                    <div><strong>Interest:</strong> {lead['interest_product']}</div>
+                    <div class="lead-message"><strong>Message:</strong> {lead['message'][:150] if lead['message'] else 'No message'}</div>
                 </div>
                 """, unsafe_allow_html=True)
                 
