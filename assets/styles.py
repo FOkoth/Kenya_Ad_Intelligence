@@ -24,7 +24,7 @@ def apply_styles():
         }
         
         /* ============================================ */
-        /* HEADER STYLING - MODERN & CLEAN */
+        /* HEADER STYLING - GRADIENT BACKGROUND */
         /* ============================================ */
         .app-header {
             background: linear-gradient(135deg, #004953 0%, #006B7A 100%);
@@ -50,6 +50,25 @@ def apply_styles():
             color: rgba(255,255,255,0.85);
             margin: 0.2rem 0 0 0;
             font-size: 0.8rem;
+        }
+        
+        /* Logout button styling */
+        .logout-btn-custom {
+            background: rgba(255,255,255,0.15);
+            border: 1px solid rgba(255,255,255,0.3);
+            border-radius: 12px;
+            padding: 0.5rem 1.2rem;
+            color: white;
+            font-weight: 500;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-align: center;
+        }
+        
+        .logout-btn-custom:hover {
+            background: rgba(255,255,255,0.25);
+            transform: translateY(-2px);
         }
         
         /* ============================================ */
@@ -469,19 +488,16 @@ def apply_styles():
         }
         
         /* ============================================ */
-        /* GRID LAYOUT FOR METRICS */
-        /* ============================================ */
-        .metrics-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1rem;
-            margin-bottom: 1.5rem;
-        }
-        
-        /* ============================================ */
         /* DATE INPUT STYLING */
         /* ============================================ */
         .stDateInput > div > div > input {
+            border-radius: 10px;
+        }
+        
+        /* ============================================ */
+        /* MULTISELECT STYLING */
+        /* ============================================ */
+        .stMultiSelect > div > div {
             border-radius: 10px;
         }
     </style>
