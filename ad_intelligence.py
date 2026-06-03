@@ -30,7 +30,7 @@ if st.session_state.logged_in:
     else:
         client.render()
 else:
-    # Login page
+    # Login page with gradient header
     st.markdown("""
     <div class="app-header">
         <div class="header-title">
