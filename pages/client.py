@@ -10,7 +10,7 @@ from services.leads import add_lead, get_leads, update_lead_status, get_lead_sta
 from services.recommendations import MediaRecommendationEngine, StationDatabase
 from services.stations import get_all_stations
 from assets.styles import apply_styles
-from utils.helpers import format_currency, format_date, get_month_name
+from utils.helpers import format_currency, format_date
 
 def render():
     apply_styles()
@@ -19,18 +19,22 @@ def render():
     company_name = company['name'] if company else "Your Company"
     company_email = company['email'] if company else ""
     
-    # Header with logout
+    # Header with gradient background and logout
     col1, col2 = st.columns([5, 1])
     with col1:
         st.markdown(f"""
-        <div class="header-title">
-            <h1>👋 Welcome, {company_name}</h1>
-            <p>Your personalized advertising intelligence dashboard</p>
+        <div class="app-header">
+            <div class="header-title">
+                <h1>👋 Welcome, {company_name}</h1>
+                <p>Your personalized advertising intelligence dashboard</p>
+            </div>
+            <div></div>
         </div>
         """, unsafe_allow_html=True)
     with col2:
         if st.button("🚪 Logout", use_container_width=True):
-            st.session_state.logged_in = False
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
             st.rerun()
     
     # Time filter
@@ -50,17 +54,17 @@ def render():
     booking_stats = get_booking_statistics(st.session_state.company_id, selected_year, selected_month)
     
     # Metrics Row
-    col1, col2, col3, col4, col5 = st.columns(5)
-    with col1:
-        st.markdown(f'<div class="metric-card"><div class="metric-label">👥 Total Leads</div><div class="metric-value">{lead_stats["total"]}</div></div>', unsafe_allow_html=True)
-    with col2:
-        st.markdown(f'<div class="metric-card"><div class="metric-label">🆕 New Leads</div><div class="metric-value">{lead_stats["new"]}</div></div>', unsafe_allow_html=True)
-    with col3:
-        st.markdown(f'<div class="metric-card"><div class="metric-label">✅ Converted</div><div class="metric-value">{lead_stats["converted"]}</div></div>', unsafe_allow_html=True)
-    with col4:
-        st.markdown(f'<div class="metric-card"><div class="metric-label">📋 Bookings</div><div class="metric-value">{booking_stats["total"]}</div></div>', unsafe_allow_html=True)
-    with col5:
-        st.markdown(f'<div class="metric-card"><div class="metric-label">📈 Conv. Rate</div><div class="metric-value">{lead_stats["conversion_rate"]}%</div></div>', unsafe_allow_html=True)
+    cols = st.columns(5)
+    metrics = [
+        ("👥 Total Leads", lead_stats["total"]),
+        ("🆕 New Leads", lead_stats["new"]),
+        ("✅ Converted", lead_stats["converted"]),
+        ("📋 Bookings", booking_stats["total"]),
+        ("📈 Conv. Rate", f"{lead_stats['conversion_rate']}%")
+    ]
+    for col, (label, value) in zip(cols, metrics):
+        with col:
+            st.markdown(f'<div class="metric-card"><div class="metric-label">{label}</div><div class="metric-value">{value}</div></div>', unsafe_allow_html=True)
     
     st.markdown("---")
     
@@ -74,6 +78,11 @@ def render():
         engine = MediaRecommendationEngine()
         station_db = StationDatabase()
         
+        if 'recs' not in st.session_state:
+            st.session_state.recs = None
+        if 'rec_params' not in st.session_state:
+            st.session_state.rec_params = {}
+        
         col1, col2 = st.columns(2)
         with col1:
             campaign_goal = st.selectbox("Campaign Goal", ["Brand Awareness", "Lead Generation", "Sales"])
@@ -82,9 +91,14 @@ def render():
         with col2:
             target_audience = st.selectbox("Target Audience", ["Mass Market", "Youth (18-35)", "Professionals"])
             region_type = st.selectbox("Region Type", ["National", "Local", "Both"])
+            
+            # Show local area selection if Local or Both is selected
+            selected_area = None
+            if region_type in ["Local", "Both"]:
+                selected_area = st.selectbox("Select Local Area", station_db.get_all_local_areas())
         
         if st.button("🔍 Generate Recommendations", use_container_width=True):
-            recs = engine.recommend_stations(campaign_goal, budget, duration, target_audience, region_type)
+            recs = engine.recommend_stations(campaign_goal, budget, duration, target_audience, region_type, selected_area)
             st.session_state.recs = recs
             st.session_state.rec_params = {'goal': campaign_goal, 'budget': budget, 'duration': duration, 'audience': target_audience, 'region': region_type}
             st.rerun()
@@ -148,15 +162,16 @@ def render():
         
         bookings = get_bookings(st.session_state.company_id, selected_year, selected_month)
         if not bookings.empty:
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Total", booking_stats['total'])
-            with col2:
-                st.metric("Pending", booking_stats['pending_approval'])
-            with col3:
-                st.metric("Approved", booking_stats['approved'])
-            with col4:
-                st.metric("Confirmed", booking_stats['confirmed'])
+            cols = st.columns(4)
+            booking_metrics = [
+                ("Total", booking_stats['total']),
+                ("Pending", booking_stats['pending_approval']),
+                ("Approved", booking_stats['approved']),
+                ("Confirmed", booking_stats['confirmed'])
+            ]
+            for col, (label, value) in zip(cols, booking_metrics):
+                with col:
+                    st.metric(label, value)
             st.markdown("---")
             
             for _, b in bookings.iterrows():
@@ -180,14 +195,14 @@ def render():
                 st.markdown(f"""
                 <div class="booking-card {border_class}">
                     <div class="booking-header">
-                        <span class="booking-id">Booking #{b['booking_id']}</span>
+                        <strong>Booking #{b['booking_id']}</strong>
                         <span class="booking-date">{format_date(b['request_date'])}</span>
                     </div>
                     <div class="booking-details">
-                        <div class="booking-detail-item"><span class="booking-detail-label">Stations:</span> {b.get('selected_stations', b['station_name'])}</div>
-                        <div class="booking-detail-item"><span class="booking-detail-label">Budget:</span> {format_currency(b['budget_kes'])}</div>
-                        <div class="booking-detail-item"><span class="booking-detail-label">Duration:</span> {b['duration_days']} days</div>
-                        <div class="booking-detail-item"><span class="booking-detail-label">Goal:</span> {b.get('campaign_goal', 'N/A')}</div>
+                        <div><span class="booking-detail-label">Stations:</span> {b.get('selected_stations', b['station_name'])}</div>
+                        <div><span class="booking-detail-label">Budget:</span> {format_currency(b['budget_kes'])}</div>
+                        <div><span class="booking-detail-label">Duration:</span> {b['duration_days']} days</div>
+                        <div><span class="booking-detail-label">Goal:</span> {b.get('campaign_goal', 'N/A')}</div>
                     </div>
                     <div style="margin-top: 0.5rem;">
                         <span class="{badge}">{text}</span>
@@ -204,7 +219,7 @@ def render():
                     st.info("⏳ Waiting for admin approval...")
                 st.markdown("---")
         else:
-            st.info("No bookings found for selected period. Generate recommendations and submit a booking.")
+            st.info("No bookings found for selected period.")
         st.markdown('</div>', unsafe_allow_html=True)
     
     # Tab 3: My Leads
@@ -231,17 +246,15 @@ def render():
                 st.markdown(f"""
                 <div class="lead-card">
                     <div class="lead-header">
-                        <span class="lead-name">{lead['lead_name']}</span>
+                        <strong>{lead['lead_name']}</strong>
                         <span>{status_badge}</span>
                     </div>
                     <div class="lead-contact">
                         <span>📞 {lead['lead_phone']}</span>
                         <span>📧 {lead['lead_email']}</span>
                     </div>
-                    <div class="lead-message">
-                        <strong>💬 Interest:</strong> {lead['interest_product']}<br>
-                        <strong>📝 Message:</strong> {lead['message'][:150] if lead['message'] else 'No message'}
-                    </div>
+                    <div><strong>Interest:</strong> {lead['interest_product']}</div>
+                    <div class="lead-message"><strong>Message:</strong> {lead['message'][:150] if lead['message'] else 'No message'}</div>
                 </div>
                 """, unsafe_allow_html=True)
                 if lead['status'] == 'new':
@@ -250,19 +263,19 @@ def render():
                         st.rerun()
                 st.markdown("---")
             
-            # Lead statistics
             st.markdown("#### 📊 Lead Status Summary")
             status_counts = leads.groupby('status').size().reset_index(name='count')
             st.dataframe(status_counts, use_container_width=True, hide_index=True)
         else:
-            st.info("No leads found for selected period. Use the demo form above to test lead capture.")
+            st.info("No leads found for selected period.")
         st.markdown('</div>', unsafe_allow_html=True)
     
-    # Tab 4: Media Directory
+    # Tab 4: Media Directory with Region Filter
     with tab4:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
         st.markdown('<p class="section-title">📺 📻 Media Directory</p>', unsafe_allow_html=True)
         
+        # Region filter for media directory
         region_filter = st.selectbox("Filter by Region", ["All", "National", "Coast", "Western", "Central"])
         
         for station in get_all_stations():
@@ -272,9 +285,11 @@ def render():
                     with col1:
                         st.write(f"**Region:** {station['region']}")
                         st.write(f"**Reach:** {station['reach']:,}")
+                        st.write(f"**Price Tier:** {station['price_tier']}")
                     if station['contacts']:
                         with col2:
-                            st.write("**Contact:**")
+                            st.write("**Contact Information:**")
+                            st.write(f"👤 {station['contacts']['contact_person']}")
                             st.write(f"📞 {station['contacts']['contact_phone']}")
                             st.write(f"📧 {station['contacts']['contact_email']}")
         st.markdown('</div>', unsafe_allow_html=True)
@@ -287,14 +302,15 @@ def render():
             total_revenue = df['revenue_kes'].sum()
             avg_roas = total_revenue / total_spend if total_spend > 0 else 0
             
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.markdown(f'<div class="metric-card"><div class="metric-label">💰 Total Spend</div><div class="metric-value">{format_currency(total_spend)}</div></div>', unsafe_allow_html=True)
-            with col2:
-                st.markdown(f'<div class="metric-card"><div class="metric-label">💵 Total Revenue</div><div class="metric-value">{format_currency(total_revenue)}</div></div>', unsafe_allow_html=True)
-            with col3:
-                roas_color = "#EF4444" if avg_roas < 2 else "#10B981"
-                st.markdown(f'<div class="metric-card"><div class="metric-label">📈 ROAS</div><div class="metric-value" style="color:{roas_color};">{avg_roas:.2f}x</div></div>', unsafe_allow_html=True)
+            cols = st.columns(3)
+            performance_metrics = [
+                ("💰 Total Spend", format_currency(total_spend)),
+                ("💵 Total Revenue", format_currency(total_revenue)),
+                ("📈 ROAS", f"{avg_roas:.2f}x")
+            ]
+            for col, (label, value) in zip(cols, performance_metrics):
+                with col:
+                    st.markdown(f'<div class="metric-card"><div class="metric-label">{label}</div><div class="metric-value">{value}</div></div>', unsafe_allow_html=True)
             
             campaign_roas = df.groupby('campaign_name')['roas'].mean().reset_index()
             fig = px.bar(campaign_roas, x='roas', y='campaign_name', orientation='h', color='roas', color_continuous_scale='RdYlGn')
